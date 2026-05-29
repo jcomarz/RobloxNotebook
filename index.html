@@ -4,6 +4,19 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Lab Notebook</title>
+<meta name="description" content="Read and write SOPs and personal lab notebooks from any device. Mobile-friendly.">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0f172a">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Lab Notebook">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Lab Notebook">
+<meta property="og:description" content="Read and write SOPs and personal lab notebooks from any device.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A//www.w3.org/2000/svg%27%20viewBox%3D%270%200%20100%20100%27%3E%3Ctext%20y%3D%27.9em%27%20font-size%3D%2790%27%3E%F0%9F%93%93%3C/text%3E%3C/svg%3E">
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A//www.w3.org/2000/svg%27%20viewBox%3D%270%200%20100%20100%27%3E%3Ctext%20y%3D%27.9em%27%20font-size%3D%2790%27%3E%F0%9F%93%93%3C/text%3E%3C/svg%3E">
+<link rel="manifest" href="data:application/manifest+json,%7B%22name%22%3A%20%22Lab%20Notebook%22%2C%20%22short_name%22%3A%20%22Notebook%22%2C%20%22start_url%22%3A%20%22.%22%2C%20%22scope%22%3A%20%22.%22%2C%20%22display%22%3A%20%22standalone%22%2C%20%22background_color%22%3A%20%22%230f172a%22%2C%20%22theme_color%22%3A%20%22%230f172a%22%2C%20%22icons%22%3A%20%5B%7B%22src%22%3A%20%22data%3Aimage/svg%2Bxml%2C%253Csvg%2520xmlns%253D%2527http%253A//www.w3.org/2000/svg%2527%2520viewBox%253D%25270%25200%2520100%2520100%2527%253E%253Ctext%2520y%253D%2527.9em%2527%2520font-size%253D%252790%2527%253E%25F0%259F%2593%2593%253C/text%253E%253C/svg%253E%22%2C%20%22sizes%22%3A%20%22any%22%2C%20%22type%22%3A%20%22image/svg%2Bxml%22%2C%20%22purpose%22%3A%20%22any%22%7D%5D%7D">
 <style>
   :root {
     --bg:#0f172a; --panel:#1e293b; --panel-2:#334155;
@@ -251,11 +264,11 @@
   <p class="hint">Read and write SOPs and your personal notebooks. Mobile-friendly. Connects to the same Firebase data as Persona City.</p>
   <div class="field">
     <label>Room Code</label>
-    <input id="setup-room" placeholder="e.g. FVHA" maxlength="8" autocomplete="off" autocapitalize="characters">
+    <input id="setup-room" placeholder="Enter room code" maxlength="8" autocomplete="off" autocapitalize="characters">
   </div>
   <div class="field">
     <label>Your Player Name</label>
-    <input id="setup-name" placeholder="e.g. jerico" autocomplete="off">
+    <input id="setup-name" placeholder="Enter your player name" autocomplete="off">
   </div>
   <button class="primary" id="setup-go">Connect</button>
   <p class="hint" style="margin-top: 20px; font-size:11px;">
@@ -330,6 +343,23 @@ const firebaseConfig = {
     projectId: "persona-city",
     storageBucket: "persona-city.appspot.com",
 };
+// Graceful guard: if the Firebase SDK didn't load, explain why instead of crashing.
+if (typeof firebase === 'undefined') {
+    var setupEl = document.getElementById('setup');
+    if (setupEl) {
+        setupEl.innerHTML =
+            '<h1>📓 Lab Notebook</h1>' +
+            '<p class="hint" style="color:#fca5a5; line-height:1.6;">' +
+            'Couldn\'t load the Firebase SDK from <b>gstatic.com</b>, so the app can\'t start.<br><br>' +
+            'Most common causes:<br>' +
+            '• A content/ad blocker (uBlock Origin, Brave Shields, Firefox strict tracking) — allow ' +
+            '<b>www.gstatic.com</b> and <b>*.firebaseio.com</b> for this site, then reload.<br>' +
+            '• No network connection.<br>' +
+            '• You\'re viewing this inside an in-app preview/sandbox — open the real GitHub Pages URL instead.' +
+            '</p>';
+    }
+    throw new Error('Firebase SDK failed to load (gstatic blocked or unreachable).');
+}
 firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 
