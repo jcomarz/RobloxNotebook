@@ -5683,7 +5683,7 @@ function escAttr(s){ return escHtml(s); }
 function sanitizeKey(s){ return (s||'').toLowerCase().replace(/[^a-z0-9_-]/g,'_'); }
 function getSyncKey(){ return (localStorage.getItem(RP_LS.key)||'').trim(); }
 function rpDeviceName(){ return localStorage.getItem(RP_LS.device)||'device'; }
-function rpPaths(k){ return { printers:`labelStation/${k}/printers`, defaultId:`labelStation/${k}/defaultPrinterId`, jobs:`labelStation/${k}/jobs` }; }
+function rpPaths(k){ return { printers:`rooms/${k}/labelStation/printers`, defaultId:`rooms/${k}/labelStation/defaultPrinterId`, jobs:`rooms/${k}/labelStation/jobs` }; }
 
 function switchTopTab(name){
     document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
