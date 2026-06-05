@@ -267,6 +267,9 @@
     width: 100%; height: 100%;
     border: none; display: block;
   }
+  #view-labels { flex:1; min-height:0; display:none; }
+  #view-labels.show { display:flex; }
+  #label-frame { flex:1; width:100%; height:100%; border:0; display:block; }
 
   /* Settings sheet */
   #settings-scrim {
@@ -350,6 +353,7 @@
     <button class="tab active" data-tab="sops">📋 SOPs</button>
     <button class="tab" data-tab="notebooks">📓 Notebooks</button>
     <button class="tab" data-tab="trees">🌳 Trees</button>
+    <button class="tab" data-tab="labels">🏷️ Labels</button>
   </div>
   
   <!-- SOPs list -->
@@ -365,6 +369,11 @@
   <!-- Decision trees list -->
   <div class="list-view" id="view-trees" style="display:none;">
     <div class="empty">Loading…</div>
+  </div>
+
+  <!-- Label & printer tools (isolated in an iframe so its CSS/JS can't collide) -->
+  <div id="view-labels">
+    <iframe id="label-frame" title="Label &amp; printer tools" allow="clipboard-write" referrerpolicy="no-referrer"></iframe>
   </div>
   
   <!-- Editor view -->
@@ -2032,6 +2041,3877 @@ postHost({ type:'bw:ready' });
 </html>
 </script>
 
+<!-- Embedded label & printer tools (loaded into #label-frame via srcdoc).
+     type="text/plain" keeps it inert here; closing script tags are escaped. -->
+<script type="text/plain" id="label-doc"><!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Combined Label Tools - ZT410 Designer + QR + Image Editor</title>
+    <!-- VERSION: 2024-12-24-BATCH-OFFSET-FIX -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"><\/script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.js"><\/script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"><\/script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"><\/script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            background: linear-gradient(135deg, #f5f7fa 0%, #e4e8ec 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .main-container {
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+
+        .tool-section {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            padding: 40px;
+            margin-bottom: 30px;
+        }
+
+        .section-header {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 3px solid #e5e7eb;
+        }
+
+        .section-header svg {
+            width: 40px;
+            height: 40px;
+            color: #2563eb;
+        }
+
+        .section-header h1 {
+            color: #1f2937;
+            font-size: 28px;
+        }
+
+        /* ===== ZEBRA LABEL DESIGNER STYLES ===== */
+        .form-group {
+            margin-bottom: 25px;
+        }
+
+        label {
+            display: block;
+            font-weight: 600;
+            color: #374151;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+
+        input[type="text"],
+        input[type="number"],
+        input[type="file"],
+        textarea {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid #d1d5db;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+        }
+
+        input[type="text"]:focus,
+        input[type="number"]:focus,
+        textarea:focus {
+            outline: none;
+            border-color: #2563eb;
+        }
+
+        textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 15px;
+            margin-top: 30px;
+        }
+
+        .preview-section {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f9fafb;
+            border-radius: 8px;
+            border: 2px solid #e5e7eb;
+        }
+
+        .preview-section h3 {
+            margin-bottom: 15px;
+            color: #374151;
+        }
+
+        .label-preview {
+            background: linear-gradient(135deg, #c8c8c8 0%, #b0b0b0 100%);
+            border: 2px solid #888;
+            width: 700px;
+            height: 300px;
+            margin: 0 auto;
+            position: relative;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+            padding: 15px;
+            overflow: visible !important;
+        }
+
+        .label-preview::before {
+            content: '';
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            width: 450px;
+            height: 270px;
+            background: white;
+            box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
+            clip-path: polygon(
+                0 0,
+                0 100%,
+                50% 100%,
+                50% 50%,
+                90% 40%,
+                90% 10%,
+                50% 0
+            );
+        }
+
+        .preview-flag-cutout {
+            display: none;
+        }
+
+        .preview-flag-body {
+            display: none;
+        }
+
+        .preview-dot {
+            position: absolute;
+            top: 125px;
+            right: 100px;
+            width: 60px;
+            height: 60px;
+            background: white;
+            border-radius: 50%;
+            z-index: 15;
+            border: 2px solid #888;
+            box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        .preview-dot-text {
+            position: absolute;
+            top: 138px;
+            right: 113px;
+            width: 34px;
+            height: 34px;
+            z-index: 20;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Courier New', monospace;
+            font-size: 18px;
+            font-weight: bold;
+            color: #000;
+        }
+
+        .preview-image {
+            position: absolute;
+            top: 40px;
+            left: 80px;
+            max-width: 150px;
+            max-height: 150px;
+            z-index: 10;
+            cursor: move;
+            border: 2px dashed transparent;
+            transition: border 0.2s;
+        }
+
+        .preview-image:hover {
+            border: 2px dashed #2563eb;
+        }
+
+        .preview-image.dragging {
+            border: 2px dashed #2563eb;
+            opacity: 0.7;
+        }
+
+        .image-resize-handle {
+            position: absolute;
+            width: 12px;
+            height: 12px;
+            background: #2563eb;
+            border: 2px solid white;
+            border-radius: 50%;
+            cursor: nwse-resize;
+            z-index: 11;
+            display: none;
+        }
+
+        .preview-image:hover + .image-resize-handle,
+        .image-resize-handle:hover {
+            display: block;
+        }
+
+        .preview-text {
+            position: absolute;
+            left: 40px;
+            top: 10px !important;
+            font-family: 'Courier New', monospace;
+            font-size: 16px;
+            font-weight: bold;
+            white-space: pre-line;
+            z-index: 25;
+            max-width: 380px;
+        }
+
+        .preview-cutoff-line {
+            position: absolute;
+            left: 15px;
+            width: 450px;
+            height: 2px;
+            background: repeating-linear-gradient(
+                90deg,
+                #ef4444 0,
+                #ef4444 10px,
+                transparent 10px,
+                transparent 20px
+            );
+            z-index: 12;
+            pointer-events: none;
+        }
+
+        .preview-cutoff-warning {
+            position: absolute;
+            background: #ef4444;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: bold;
+            z-index: 13;
+            display: none;
+        }
+
+        .preview-barcode {
+            position: absolute;
+            left: 10px;
+            font-family: 'Libre Barcode 128', monospace;
+            font-size: 50px;
+            z-index: 10;
+            max-width: 380px;
+            overflow: hidden;
+        }
+
+        button {
+            flex: 1;
+            padding: 14px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        button svg {
+            width: 20px;
+            height: 20px;
+        }
+
+        .btn-primary {
+            background: #2563eb;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #1d4ed8;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+        }
+
+        .btn-secondary {
+            background: #4b5563;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #374151;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(75, 85, 99, 0.3);
+        }
+
+        .status {
+            margin-top: 20px;
+            padding: 16px;
+            border-radius: 8px;
+            display: none;
+        }
+
+        .status.show {
+            display: block;
+        }
+
+        .status.success {
+            background: #d1fae5;
+            color: #065f46;
+            border: 1px solid #6ee7b7;
+        }
+
+        .status.error {
+            background: #fee2e2;
+            color: #991b1b;
+            border: 1px solid #fca5a5;
+        }
+
+        .info-box {
+            margin-top: 30px;
+            padding: 20px;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+
+        .info-box.blue {
+            background: #dbeafe;
+            border: 1px solid #93c5fd;
+            color: #1e3a8a;
+        }
+
+        .info-box.yellow {
+            background: #fef3c7;
+            border: 1px solid #fcd34d;
+            color: #78350f;
+        }
+
+        .info-box h3 {
+            font-size: 16px;
+            margin-bottom: 12px;
+        }
+
+        .info-box ul {
+            margin-left: 20px;
+        }
+
+        .info-box li {
+            margin-bottom: 6px;
+        }
+
+        code {
+            background: rgba(0, 0, 0, 0.1);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+
+        .mode-indicator {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            z-index: 20;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .mode-indicator.standard {
+            background: #10b981;
+            color: white;
+        }
+
+        .mode-indicator.extended {
+            background: #f59e0b;
+            color: white;
+        }
+
+        .random-info {
+            display: none;
+            margin-top: 10px;
+            padding: 10px;
+            background: #dbeafe;
+            border-radius: 6px;
+            font-size: 13px;
+            color: #1e40af;
+        }
+
+        .btn-random {
+            background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+            color: white;
+            padding: 10px 20px;
+            margin-top: 10px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-random:hover {
+            background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%);
+            transform: translateY(-2px);
+        }
+
+        /* ===== QR GENERATOR STYLES ===== */
+        .qr-section {
+            background: #f8f9ff;
+            padding: 20px;
+            border-radius: 8px;
+            border: 2px solid #e5e7eb;
+        }
+
+        .qr-input-group {
+            margin-bottom: 15px;
+        }
+
+        #qrcode {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin: 20px 0;
+            min-height: 355px;
+            background: #ffffff;
+            border-radius: 10px;
+            padding: 20px;
+            border: 2px solid #d1d5db;
+        }
+
+        #qrcode canvas {
+            border-radius: 8px;
+        }
+
+        .placeholder {
+            color: #999;
+            text-align: center;
+            font-style: italic;
+        }
+
+        .btn-qr {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-qr:hover {
+            background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
+        }
+
+        .btn-use-qr {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: white;
+            margin-top: 10px;
+        }
+
+        .btn-use-qr:hover {
+            background: linear-gradient(135deg, #059669 0%, #10b981 100%);
+        }
+
+        /* ===== THRESHOLD EDITOR STYLES ===== */
+        .upload-area {
+            border: 3px dashed #667eea;
+            border-radius: 15px;
+            padding: 40px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-bottom: 30px;
+            background: #f8f9ff;
+        }
+
+        .upload-area:hover {
+            border-color: #764ba2;
+            background: #f0f2ff;
+        }
+
+        .upload-area.dragover {
+            border-color: #764ba2;
+            background: #e8ebff;
+            transform: scale(1.02);
+        }
+
+        .upload-icon {
+            font-size: 48px;
+            margin-bottom: 10px;
+        }
+
+        .upload-text {
+            color: #667eea;
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .upload-subtext {
+            color: #999;
+            font-size: 14px;
+            margin-top: 5px;
+        }
+
+        .canvas-container {
+            display: none;
+            margin-bottom: 30px;
+        }
+
+        .canvas-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 25px;
+        }
+
+        .canvas-box {
+            text-align: center;
+        }
+
+        .canvas-label {
+            font-weight: 600;
+            color: #555;
+            margin-bottom: 10px;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .canvas-wrapper {
+            position: relative;
+            display: inline-block;
+        }
+
+        canvas {
+            border: 2px solid #ddd;
+            border-radius: 10px;
+            max-width: 100%;
+            height: auto;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+            display: block;
+        }
+
+        #resultCanvas {
+            cursor: crosshair;
+        }
+
+        #resultCanvas.eraser {
+            cursor: cell;
+        }
+
+        .controls {
+            background: #f8f9ff;
+            padding: 25px;
+            border-radius: 15px;
+            margin-bottom: 20px;
+        }
+
+        .control-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            margin-bottom: 25px;
+        }
+
+        .threshold-control {
+            margin-bottom: 20px;
+        }
+
+        .threshold-control:last-child {
+            margin-bottom: 0;
+        }
+
+        .threshold-label {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .threshold-label span {
+            font-weight: 600;
+            color: #333;
+            font-size: 13px;
+        }
+
+        .threshold-value {
+            background: #667eea;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 15px;
+            font-size: 13px;
+            font-weight: 700;
+        }
+
+        input[type="range"] {
+            width: 100%;
+            height: 6px;
+            border-radius: 5px;
+            background: linear-gradient(to right, #000 0%, #fff 100%);
+            outline: none;
+            -webkit-appearance: none;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #667eea;
+            cursor: pointer;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+            transition: all 0.2s ease;
+        }
+
+        input[type="range"]::-webkit-slider-thumb:hover {
+            transform: scale(1.2);
+            background: #764ba2;
+        }
+
+        input[type="range"]::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #667eea;
+            cursor: pointer;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+            border: none;
+            transition: all 0.2s ease;
+        }
+
+        input[type="range"]::-moz-range-thumb:hover {
+            transform: scale(1.2);
+            background: #764ba2;
+        }
+
+        .brush-controls {
+            background: #fff3cd;
+            border: 2px solid #ffc107;
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .brush-title {
+            font-weight: 700;
+            color: #856404;
+            margin-bottom: 15px;
+            font-size: 16px;
+            text-align: center;
+        }
+
+        .brush-buttons {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+        }
+
+        .brush-btn {
+            padding: 10px 20px;
+            font-size: 14px;
+            font-weight: 600;
+            border: 2px solid #ffc107;
+            background: white;
+            color: #856404;
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .brush-btn:hover {
+            background: #fff3cd;
+        }
+
+        .brush-btn.active {
+            background: #ffc107;
+            color: white;
+        }
+
+        .brush-size-control {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .brush-size-label {
+            font-weight: 600;
+            color: #856404;
+            min-width: 120px;
+        }
+
+        .brush-size-value {
+            background: #ffc107;
+            color: white;
+            padding: 5px 12px;
+            border-radius: 15px;
+            font-size: 13px;
+            font-weight: 700;
+            min-width: 50px;
+            text-align: center;
+        }
+
+        .btn-warning {
+            background: white;
+            color: #ff6b6b;
+            border: 2px solid #ff6b6b;
+        }
+
+        .btn-warning:hover {
+            background: #ff6b6b;
+            color: white;
+            transform: translateY(-2px);
+        }
+
+        @media (max-width: 1024px) {
+            .control-row {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .canvas-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        /* ===== REMOTE / TABS / PRINTER DIRECTORY ===== */
+        .tab-nav { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:20px; position:sticky; top:0; z-index:50;
+                   background:rgba(245,247,250,0.95); padding:10px; border-radius:12px; backdrop-filter:blur(6px); }
+        .tab-btn { flex:1 1 auto; min-width:120px; padding:12px 16px; border:none; border-radius:10px; cursor:pointer;
+                   font-size:15px; font-weight:600; background:#e5e7eb; color:#374151; transition:all .15s; }
+        .tab-btn:hover { background:#d1d5db; }
+        .tab-btn.active { background:#2563eb; color:#fff; box-shadow:0 4px 10px rgba(37,99,235,.3); }
+        .tab-panel { display:none; }
+        .tab-panel.active { display:block; }
+        .conn-bar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; background:#f0f9ff; border:1px solid #bae6fd;
+                    border-radius:10px; padding:12px 14px; margin-bottom:20px; }
+        .conn-bar input { padding:8px 10px; border:2px solid #d1d5db; border-radius:6px; font-size:14px; }
+        .conn-dot { width:10px; height:10px; border-radius:50%; background:#9ca3af; display:inline-block; }
+        .conn-dot.on { background:#10b981; box-shadow:0 0 0 4px rgba(16,185,129,.2); }
+        .conn-dot.off { background:#ef4444; }
+        .ptable { width:100%; border-collapse:collapse; }
+        .ptable th, .ptable td { padding:8px 10px; text-align:left; border-bottom:1px solid #e5e7eb; font-size:14px; }
+        .ptable th { color:#6b7280; font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
+        .ptable input { width:100%; padding:7px 9px; border:2px solid #e5e7eb; border-radius:6px; font-size:14px; }
+        .ptable input:focus { outline:none; border-color:#2563eb; }
+        .ptable .ip-input { font-family:ui-monospace,Menlo,Consolas,monospace; }
+        .row-btn { padding:6px 10px; border:none; border-radius:6px; cursor:pointer; font-size:13px; }
+        .row-del { background:#fee2e2; color:#b91c1c; }
+        .row-del:hover { background:#fecaca; }
+        .job-card { display:flex; gap:12px; align-items:center; justify-content:space-between; padding:12px 14px;
+                    border:1px solid #e5e7eb; border-radius:10px; margin-bottom:8px; background:#fff; }
+        .job-meta { font-size:13px; color:#374151; }
+        .job-meta .j-printer { font-weight:700; color:#111827; }
+        .badge2 { padding:3px 9px; border-radius:999px; font-size:12px; font-weight:700; }
+        .b-queued  { background:#fef3c7; color:#92400e; }
+        .b-printing{ background:#dbeafe; color:#1e40af; }
+        .b-sent    { background:#d1fae5; color:#065f46; }
+        .b-error   { background:#fee2e2; color:#b91c1c; }
+        .agent-toggle { display:flex; align-items:center; gap:12px; padding:16px; border-radius:12px;
+                        background:#111827; color:#fff; margin-bottom:18px; }
+        .agent-toggle.on { background:#065f46; }
+        .switch { position:relative; width:54px; height:30px; flex:0 0 auto; }
+        .switch input { opacity:0; width:0; height:0; }
+        .slider { position:absolute; inset:0; background:#4b5563; border-radius:30px; transition:.2s; cursor:pointer; }
+        .slider:before { content:""; position:absolute; height:22px; width:22px; left:4px; top:4px; background:#fff;
+                         border-radius:50%; transition:.2s; }
+        .switch input:checked + .slider { background:#34d399; }
+        .switch input:checked + .slider:before { transform:translateX(24px); }
+        .log-box { background:#0b1020; color:#9fe8c0; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px;
+                   border-radius:10px; padding:12px; max-height:220px; overflow-y:auto; white-space:pre-wrap; }
+    </style>
+</head>
+<body>
+    <div class="main-container">
+        <div class="tab-nav">
+            <button class="tab-btn active" data-tab="designer" onclick="switchTopTab('designer')">🏷️ Designer</button>
+            <button class="tab-btn" data-tab="printers" onclick="switchTopTab('printers')">🖨️ Printers</button>
+            <button class="tab-btn" data-tab="remote" onclick="switchTopTab('remote')">📡 Remote Print</button>
+        </div>
+
+        <div id="tab-designer" class="tab-panel active">
+        <!-- ===== ZEBRA LABEL DESIGNER SECTION ===== -->
+        <div class="tool-section" id="labelDesigner">
+            <div class="section-header">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                </svg>
+                <h1>Zebra ZT410 Label Designer</h1>
+            </div>
+
+            <div class="form-group">
+                <label for="labelText">Main Label Text (one line per field)</label>
+                <textarea id="labelText" placeholder="Enter your label text&#10;Line 2&#10;Line 3" rows="4" oninput="updatePreview()"></textarea>
+            </div>
+
+            <div class="form-group">
+                <label for="imageUpload">Image Upload (Optional - or use QR Code below)</label>
+                <input type="file" id="imageUpload" accept="image/*" multiple onchange="handleImageUpload(event)">
+                
+                <div id="randomInfo" class="random-info">
+                    <strong>Random mode:</strong> <span id="imageCount">0</span> images loaded. 
+                    <span id="currentImageName"></span>
+                </div>
+                
+                <button id="randomButton" class="btn-random" onclick="selectRandomImage()" style="display: none;">
+                    🎲 Pick Random Image
+                </button>
+
+                <!-- BATCH PRINTING QUEUE -->
+                <div id="batchQueue" style="display: none; margin-top: 15px; padding: 15px; background: #f0fdf4; border: 2px solid #10b981; border-radius: 8px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                        <h4 style="color: #065f46; margin: 0;">📋 Batch Print Queue (<span id="batchCount">0</span> images)</h4>
+                        <div style="display: flex; gap: 8px;">
+                            <button onclick="clearBatchQueue()" style="padding: 6px 12px; background: #ef4444; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">Clear Queue</button>
+                            <button onclick="printBatch()" style="padding: 6px 12px; background: #10b981; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">🖨️ Print All in Order</button>
+                        </div>
+                    </div>
+                    
+                    <div style="margin-bottom: 15px; padding: 10px; background: white; border-radius: 6px;">
+                        <label for="batchOffsetX" style="font-size: 13px; font-weight: 600; color: #065f46; display: block; margin-bottom: 5px;">
+                            📐 Horizontal Offset (shift all images)
+                        </label>
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <input type="number" id="batchOffsetX" value="0" min="-100" max="100" step="5" 
+                                   style="width: 80px; padding: 6px; border: 2px solid #d1d5db; border-radius: 4px; font-size: 13px;">
+                            <span style="font-size: 12px; color: #6b7280;">dots (negative = left, positive = right)</span>
+                        </div>
+                        <small style="color: #6b7280; font-size: 11px; display: block; margin-top: 4px;">
+                            💡 Shifts from current position (X=<span id="currentXDisplay">10</span>). Example: offset -20 → prints at X=<span id="calculatedXDisplay">-10 (⚠️ 10 dots cut off left)</span>
+                            <br>⚠️ Negative positions will cut off the left side of the image
+                        </small>
+                    </div>
+                    
+                    <div id="batchList" style="display: flex; flex-direction: column; gap: 8px; max-height: 300px; overflow-y: auto;">
+                        <!-- Batch items will appear here -->
+                    </div>
+                    <small style="color: #065f46; font-size: 11px; display: block; margin-top: 8px;">
+                        💡 Drag items to reorder • Click ❌ to remove • Print uses current label settings for each image
+                    </small>
+                </div>
+                
+                <canvas id="imageCanvas" style="display: none;"></canvas>
+                <div id="imagePreview" style="margin-top: 10px; display: none;">
+                    <img id="previewImg" style="max-width: 200px; border: 2px solid #d1d5db; border-radius: 8px;">
+                    <button onclick="clearImage()" style="margin-left: 10px; padding: 6px 12px; background: #ef4444; color: white; border: none; border-radius: 4px; cursor: pointer;">Remove</button>
+                </div>
+            </div>
+
+            <div id="imageControls" style="display: none; margin-top: 15px; padding: 15px; background: #f3f4f6; border-radius: 8px;">
+                <h4 style="margin-bottom: 10px; color: #374151;">Image Position & Size</h4>
+                <div class="grid-2" style="margin-bottom: 10px;">
+                    <div>
+                        <label for="imageX" style="font-size: 12px;">X Position (dots)</label>
+                        <input type="number" id="imageX" value="10" min="0" max="400" oninput="updateImagePosition()">
+                    </div>
+                    <div>
+                        <label for="imageY" style="font-size: 12px;">Y Position (dots)</label>
+                        <input type="number" id="imageY" value="50" min="0" max="300" oninput="updateImagePosition()">
+                    </div>
+                </div>
+                <div>
+                    <label for="imageScale" style="font-size: 12px;">Scale (%)</label>
+                    <input type="range" id="imageScale" min="10" max="200" value="100" oninput="updateImageScale()" style="width: 100%;">
+                    <span id="scaleValue" style="font-size: 12px; color: #6b7280;">100%</span>
+                </div>
+            </div>
+
+            <!-- QR CODE GENERATOR SECTION -->
+            <div class="qr-section">
+                <h3 style="margin-bottom: 15px; color: #374151;">📱 QR Code Generator (Use as Label Image)</h3>
+                <div class="qr-input-group">
+                    <label for="qrText">Enter Text or URL:</label>
+                    <textarea id="qrText" placeholder="https://example.com or any text..." rows="2"></textarea>
+                    <small style="color: #888; display: block; margin-top: 5px;">💡 Tip: Shorter URLs create simpler QR codes</small>
+                </div>
+                <button class="btn-qr" onclick="generateQR()" style="width: 100%;">Generate QR Code</button>
+                
+                <div id="qrcode">
+                    <div class="placeholder">Your QR code will appear here</div>
+                </div>
+
+                <button id="useQrBtn" class="btn-use-qr" onclick="useQRAsImage()" style="width: 100%; display: none;">✅ Use This QR Code as Label Image</button>
+            </div>
+
+            <div class="form-group">
+                <label>Print Mode</label>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <label style="display: flex; align-items: center; gap: 8px; font-weight: normal; cursor: pointer;">
+                        <input type="radio" name="printMode" value="standard" checked onchange="updatePrintMode()">
+                        <span>Standard Mode (Image works perfectly, dot circle won't print)</span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 8px; font-weight: normal; cursor: pointer;">
+                        <input type="radio" name="printMode" value="extended" onchange="updatePrintMode()">
+                        <span>Extended Mode (Dot circle prints, image may skew if resized)</span>
+                    </label>
+                </div>
+                <small style="color: #6b7280; font-size: 12px; margin-top: 4px; display: block;">Standard Mode recommended for images</small>
+            </div>
+
+            <div class="form-group">
+                <label for="barcodeData">Barcode Data (Optional)</label>
+                <input type="text" id="barcodeData" placeholder="Enter barcode number" oninput="updatePreview()">
+            </div>
+
+            <div class="form-group">
+                <label for="dotText">Dot Circle Text (Optional)</label>
+                <input type="text" id="dotText" placeholder="Enter text for circle area" maxlength="3" oninput="updatePreview()">
+                <small style="color: #6b7280; font-size: 12px; margin-top: 4px; display: block;">Max 3 characters</small>
+            </div>
+
+            <div class="form-group">
+                <label for="printerSelect">Printer (from directory)</label>
+                <select id="printerSelect" onchange="applyPrinterFromDirectory()" style="width:100%; padding:10px; border:2px solid #d1d5db; border-radius:6px; font-size:14px;">
+                    <option value="">— manual entry below —</option>
+                </select>
+                <small style="color:#6b7280; font-size:12px; margin-top:4px; display:block;">Manage this list in the 🖨️ Printers tab. Picking one fills the IP/port below.</small>
+            </div>
+
+            <div class="grid-2">
+                <div class="form-group">
+                    <label for="printerIP">Printer IP Address</label>
+                    <input type="text" id="printerIP" value="10.247.58.43" onblur="validateIP()">
+                    <small id="ipDisplay" style="color: #6b7280; font-size: 12px; margin-top: 4px; display: block;"></small>
+                </div>
+
+                <div class="form-group">
+                    <label for="port">Port</label>
+                    <input type="text" id="port" value="9100">
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="copies">Number of Copies</label>
+                <input type="number" id="copies" value="1" min="1" max="100">
+            </div>
+
+            <!-- SCHEDULED PRINTING SECTION -->
+            <div class="qr-section" style="background: #fef3c7; border: 2px solid #fbbf24;">
+                <h3 style="margin-bottom: 15px; color: #92400e;">⏰ Scheduled Printing</h3>
+                
+                <div style="margin-bottom: 20px;">
+                    <label style="display: flex; align-items: center; gap: 8px; font-weight: normal; cursor: pointer;">
+                        <input type="radio" name="printSchedule" value="now" checked onchange="updateScheduleMode()">
+                        <span>Print Now (Immediate)</span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 8px; font-weight: normal; cursor: pointer; margin-top: 8px;">
+                        <input type="radio" name="printSchedule" value="scheduled" onchange="updateScheduleMode()">
+                        <span>Schedule for Specific Date & Time</span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 8px; font-weight: normal; cursor: pointer; margin-top: 8px;">
+                        <input type="radio" name="printSchedule" value="interval" onchange="updateScheduleMode()">
+                        <span>Repeat at Interval</span>
+                    </label>
+                </div>
+
+                <div id="scheduledOptions" style="display: none; padding: 15px; background: white; border-radius: 8px; margin-bottom: 15px;">
+                    <div class="grid-2" style="gap: 15px;">
+                        <div>
+                            <label for="scheduleDate" style="font-size: 13px;">Date</label>
+                            <input type="date" id="scheduleDate" style="width: 100%; padding: 8px; border: 2px solid #d1d5db; border-radius: 6px;">
+                        </div>
+                        <div>
+                            <label for="scheduleTime" style="font-size: 13px;">Time</label>
+                            <input type="time" id="scheduleTime" style="width: 100%; padding: 8px; border: 2px solid #d1d5db; border-radius: 6px;">
+                        </div>
+                    </div>
+                </div>
+
+                <div id="intervalOptions" style="display: none; padding: 15px; background: white; border-radius: 8px; margin-bottom: 15px;">
+                    <div class="grid-2" style="gap: 15px; margin-bottom: 15px;">
+                        <div>
+                            <label for="intervalValue" style="font-size: 13px;">Interval Value</label>
+                            <input type="number" id="intervalValue" value="1" min="1" max="999" style="width: 100%; padding: 8px; border: 2px solid #d1d5db; border-radius: 6px;">
+                        </div>
+                        <div>
+                            <label for="intervalUnit" style="font-size: 13px;">Unit</label>
+                            <select id="intervalUnit" style="width: 100%; padding: 8px; border: 2px solid #d1d5db; border-radius: 6px;">
+                                <option value="seconds">Seconds</option>
+                                <option value="minutes" selected>Minutes</option>
+                                <option value="hours">Hours</option>
+                                <option value="days">Days</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div style="margin-bottom: 15px;">
+                        <label for="intervalRepeat" style="font-size: 13px;">Number of Repeats (0 = unlimited)</label>
+                        <input type="number" id="intervalRepeat" value="0" min="0" max="999" style="width: 100%; padding: 8px; border: 2px solid #d1d5db; border-radius: 6px;">
+                    </div>
+                    <div id="intervalStatus" style="display: none; padding: 10px; background: #dbeafe; border-radius: 6px; font-size: 13px; color: #1e40af;">
+                        <strong>Active:</strong> <span id="intervalStatusText"></span>
+                        <br><strong>Prints completed:</strong> <span id="intervalCount">0</span>
+                        <br><button onclick="stopInterval()" style="margin-top: 8px; padding: 6px 12px; background: #ef4444; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">⏹️ Stop Interval</button>
+                    </div>
+                </div>
+
+                <div id="scheduleStatus" style="display: none; padding: 10px; background: #dbeafe; border-radius: 6px; font-size: 13px; color: #1e40af; margin-top: 10px;">
+                    <strong>⏰ Scheduled:</strong> <span id="scheduleStatusText"></span>
+                    <br><button onclick="cancelSchedule()" style="margin-top: 8px; padding: 6px 12px; background: #ef4444; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">❌ Cancel Schedule</button>
+                </div>
+
+                <small style="color: #92400e; font-size: 12px; display: block; margin-top: 10px;">
+                    ℹ️ Scheduled prints require this browser tab to remain open. The timer runs in your browser.
+                </small>
+            </div>
+
+            <div class="button-group">
+                <button class="btn-primary" onclick="sendToPrinter()">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                    </svg>
+                    Send to Printer
+                </button>
+
+                <button class="btn-secondary" onclick="queueCurrentDesignAsJob()" style="background:#7c3aed; color:#fff;">
+                    📡 Queue to Remote
+                </button>
+                
+                <button class="btn-secondary" onclick="downloadZPL()">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    Download ZPL
+                </button>
+            </div>
+
+            <div class="preview-section">
+                <h3>Label Preview:</h3>
+                <div class="label-preview" id="labelPreview">
+                    <div id="modeIndicator" class="mode-indicator standard">STANDARD MODE</div>
+                    <div class="preview-flag-cutout"></div>
+                    <div class="preview-flag-body"></div>
+                    <div class="preview-dot"></div>
+                    <div id="previewDotText" class="preview-dot-text"></div>
+                    <img id="previewImageOnLabel" class="preview-image" style="display: none;">
+                    <div id="imageResizeHandle" class="image-resize-handle"></div>
+                    <div id="cutoffLine" class="preview-cutoff-line" style="display: none;"></div>
+                    <div id="cutoffWarning" class="preview-cutoff-warning">IMAGE WILL BE CUT OFF</div>
+                    <div id="previewTextOnLabel" class="preview-text"></div>
+                    <div id="previewBarcodeOnLabel" class="preview-barcode"></div>
+                </div>
+            </div>
+
+            <div id="status" class="status"></div>
+
+            <div class="info-box blue">
+                <h3>Label Preview Info:</h3>
+                <ul>
+                    <li>Flag design on left side with cutout</li>
+                    <li>Dot indicator on right side</li>
+                    <li>Main text and barcode displayed to the right of image</li>
+                    <li>Optional image support (converted to monochrome)</li>
+                    <li>QR codes can be generated and used as label images</li>
+                </ul>
+            </div>
+
+            <div class="info-box yellow">
+                <h3>Printing Notes:</h3>
+                <ul>
+                    <li>Direct network printing may be blocked by browser security</li>
+                    <li>If direct print fails, download the ZPL file and send it via Zebra Setup Utilities</li>
+                    <li>Ensure printer is on the same network</li>
+                    <li>You can also use command: <code>lpr -P ZebraZT410 label.zpl</code></li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- ===== IMAGE FRAMER SECTION ===== -->
+        <div class="tool-section" id="imageFramer">
+            <div class="section-header">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                <h1>Image Framer - Crop & Frame to 400×355</h1>
+            </div>
+
+            <div class="upload-section" style="text-align: center; margin-bottom: 30px;">
+                <div class="file-input-wrapper" style="position: relative; display: inline-block;">
+                    <input type="file" id="framerFileInput" accept="image/*" style="display: none;">
+                    <button class="btn-primary" onclick="document.getElementById('framerFileInput').click()" style="width: auto;">
+                        Choose Image for Framing
+                    </button>
+                </div>
+                <p class="info-text" style="margin-top: 15px; color: #666; font-size: 14px;">or press <strong>Ctrl+V</strong> to paste from clipboard</p>
+            </div>
+
+            <div class="editor-section" id="framerEditorSection" style="display: none;">
+                <div class="cropper-container-wrapper" style="max-width: 600px; margin: 0 auto 30px; border: 3px solid #667eea; border-radius: 10px; overflow: hidden; background: #f8f9fa;">
+                    <img id="framerImage" src="" alt="Image to crop" style="max-width: 100%; display: block;">
+                </div>
+
+                <div class="controls" style="display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-bottom: 20px;">
+                    <button class="control-btn" onclick="rotateLeft()" style="background: white; border: 2px solid #667eea; color: #667eea; padding: 10px 20px; border-radius: 25px; font-size: 14px; font-weight: 600; cursor: pointer;">↺ Rotate Left</button>
+                    <button class="control-btn" onclick="rotateRight()" style="background: white; border: 2px solid #667eea; color: #667eea; padding: 10px 20px; border-radius: 25px; font-size: 14px; font-weight: 600; cursor: pointer;">↻ Rotate Right</button>
+                    <button class="control-btn" onclick="zoomIn()" style="background: white; border: 2px solid #667eea; color: #667eea; padding: 10px 20px; border-radius: 25px; font-size: 14px; font-weight: 600; cursor: pointer;">🔍+ Zoom In</button>
+                    <button class="control-btn" onclick="zoomOut()" style="background: white; border: 2px solid #667eea; color: #667eea; padding: 10px 20px; border-radius: 25px; font-size: 14px; font-weight: 600; cursor: pointer;">🔍- Zoom Out</button>
+                    <button class="control-btn" onclick="resetCrop()" style="background: white; border: 2px solid #667eea; color: #667eea; padding: 10px 20px; border-radius: 25px; font-size: 14px; font-weight: 600; cursor: pointer;">⟲ Reset</button>
+                </div>
+
+                <div class="button-group">
+                    <button class="btn-primary" onclick="saveFramedImage()">💾 Save 400×355 Image</button>
+                    <button class="btn-primary" onclick="sendToThresholdEditor()" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">⚡ Send to Threshold Editor</button>
+                    <button class="btn-secondary" onclick="startOverFramer()">🔄 Start Over</button>
+                    <button class="btn-primary" onclick="useFramedAsLabel()">✅ Use as Label Image</button>
+                </div>
+
+                <div class="preview-section" style="margin-top: 30px; text-align: center; padding-top: 30px; border-top: 2px solid #e0e0e0;">
+                    <h3 style="color: #333; margin-bottom: 15px; font-size: 18px;">Live Preview (400×355)</h3>
+                    <canvas id="framerPreview" style="border: 2px solid #667eea; border-radius: 10px; max-width: 400px; margin: 0 auto; box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);"></canvas>
+                    <p class="info-text" style="color: #666; font-size: 13px; margin-top: 15px; font-style: italic;">This is how your final image will look</p>
+                </div>
+
+                <div class="info-box" style="background: #fff3cd; border: 2px solid #ffc107; color: #856404; margin-top: 20px;">
+                    <strong>⚡ Dynamic Workflow:</strong>
+                    <br>1. Frame and crop your image to 400×355 here
+                    <br>2. Click <strong>"Send to Threshold Editor"</strong> to apply black & white effects
+                    <br>3. Use brush masking in the Threshold Editor to perfect the result
+                    <br>4. Send the final result to the Label Designer
+                    <br><br><strong>💡 Tip:</strong> This workflow is perfect for processing photos before printing on labels!
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== THRESHOLD EDITOR SECTION ===== -->
+        <div class="tool-section" id="thresholdEditor">
+            <div class="section-header">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+                <h1>Black & White Threshold Editor - Brush Masking</h1>
+            </div>
+
+            <div class="upload-area" id="uploadArea">
+                <div class="upload-icon">📁</div>
+                <div class="upload-text">Click to upload or drag & drop an image</div>
+                <div class="upload-subtext">Supports JPG, PNG, GIF</div>
+                <input type="file" id="fileInput" accept="image/*" style="display: none;">
+            </div>
+
+            <div class="canvas-container" id="canvasContainer">
+                <div class="canvas-grid">
+                    <div class="canvas-box">
+                        <div class="canvas-label">Original</div>
+                        <canvas id="originalCanvas"></canvas>
+                    </div>
+                    <div class="canvas-box">
+                        <div class="canvas-label">
+                            Threshold A
+                            <span style="font-size: 11px; color: #999;">(Base Layer)</span>
+                        </div>
+                        <canvas id="thresholdACanvas"></canvas>
+                    </div>
+                    <div class="canvas-box">
+                        <div class="canvas-label">
+                            Threshold B
+                            <span style="font-size: 11px; color: #999;">(Paint Source)</span>
+                        </div>
+                        <canvas id="thresholdBCanvas"></canvas>
+                    </div>
+                    <div class="canvas-box">
+                        <div class="canvas-label">
+                            Result
+                            <span style="font-size: 11px; color: #999;">(Brush to Combine)</span>
+                        </div>
+                        <div class="canvas-wrapper">
+                            <canvas id="resultCanvas"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="controls">
+                    <div class="control-row">
+                        <div>
+                            <div class="threshold-control">
+                                <div class="threshold-label">
+                                    <span>Threshold A</span>
+                                    <span class="threshold-value" id="thresholdAValue">128</span>
+                                </div>
+                                <input type="range" id="thresholdASlider" min="0" max="255" value="128">
+                            </div>
+                            <div class="threshold-control">
+                                <div class="threshold-label">
+                                    <span>Thickening A</span>
+                                    <span class="threshold-value" id="thickenAValue">0</span>
+                                </div>
+                                <input type="range" id="thickenASlider" min="0" max="5" value="0" step="1">
+                            </div>
+                        </div>
+                        <div>
+                            <div class="threshold-control">
+                                <div class="threshold-label">
+                                    <span>Threshold B</span>
+                                    <span class="threshold-value" id="thresholdBValue">180</span>
+                                </div>
+                                <input type="range" id="thresholdBSlider" min="0" max="255" value="180">
+                            </div>
+                            <div class="threshold-control">
+                                <div class="threshold-label">
+                                    <span>Thickening B</span>
+                                    <span class="threshold-value" id="thickenBValue">0</span>
+                                </div>
+                                <input type="range" id="thickenBSlider" min="0" max="5" value="0" step="1">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="brush-controls">
+                    <div class="brush-title">🎨 Brush Tool - Paint from Threshold B onto Result</div>
+                    <div class="brush-buttons">
+                        <button class="brush-btn active" id="brushBtn">🖌️ Brush (Paint B)</button>
+                        <button class="brush-btn" id="eraserBtn">🧹 Eraser (Restore A)</button>
+                    </div>
+                    <div class="brush-size-control">
+                        <span class="brush-size-label">Brush Size:</span>
+                        <input type="range" id="brushSizeSlider" min="5" max="100" value="30" style="flex: 1;">
+                        <span class="brush-size-value" id="brushSizeValue">30</span>
+                    </div>
+                </div>
+
+                <div class="button-group">
+                    <button class="btn-primary" id="downloadBtn">📥 Download Result</button>
+                    <button class="btn-warning" id="resetMaskBtn">🔄 Reset Mask</button>
+                    <button class="btn-secondary" id="resetBtn">🆕 Load New Image</button>
+                    <button class="btn-primary" id="useAsLabelBtn">✅ Use as Label Image</button>
+                </div>
+
+                <div class="info-box">
+                    <strong>📖 How to use:</strong>
+                    <br>1. Upload an image directly OR receive one from the Image Framer above
+                    <br>2. Adjust <strong>Threshold A</strong> and <strong>Threshold B</strong> to create two different versions
+                    <br>3. The <strong>Result</strong> starts as a copy of Threshold A (the base layer)
+                    <br>4. Use the <strong>Brush</strong> to paint areas from Threshold B onto the Result
+                    <br>5. Use the <strong>Eraser</strong> to restore areas back to Threshold A
+                    <br>6. Adjust brush size as needed for fine or broad strokes
+                    <br>7. Click <strong>Use as Label Image</strong> to send the result to the label designer above
+                    <br><br><strong>💡 Pro Tip:</strong> Set Threshold A high (160-180) for fine details, Threshold B low (100-120) for dark areas, then paint the eyes/shadows from B onto the result!
+                    <br><br><strong>⚡ Dynamic Workflow:</strong> Use the Image Framer above to crop/frame your image to 400×355, then send it here for threshold editing!
+                </div>
+            </div>
+        </div>
+        </div><!-- /#tab-designer -->
+
+        <!-- ===================== PRINTERS DIRECTORY TAB ===================== -->
+        <div id="tab-printers" class="tab-panel">
+            <div class="tool-section">
+                <div class="section-header">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2z"/></svg>
+                    <h1>Printer Directory</h1>
+                </div>
+
+                <div class="conn-bar">
+                    <span><span class="conn-dot" id="connDotP"></span> <strong>Sync key</strong></span>
+                    <input type="text" id="syncKeyInput" placeholder="e.g. genedx-intake" style="min-width:180px;">
+                    <button class="btn-primary" style="padding:8px 14px;" onclick="saveSyncKey()">Connect</button>
+                    <span id="connStatusP" style="font-size:13px; color:#6b7280;">Not connected</span>
+                </div>
+
+                <p style="color:#6b7280; font-size:13px; margin-bottom:14px;">
+                    This list is shared through Firebase using the sync key above. Set the <em>same</em> sync key on your phone and your work computer so both see the same printers and job queue. Edits autosave.
+                </p>
+
+                <div style="overflow-x:auto;">
+                    <table class="ptable">
+                        <thead><tr><th style="width:40px;">Default</th><th>Name</th><th style="width:170px;">IP Address</th><th style="width:90px;">Port</th><th style="width:60px;"></th></tr></thead>
+                        <tbody id="printerRows"></tbody>
+                    </table>
+                </div>
+
+                <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:16px;">
+                    <button class="btn-primary" style="padding:10px 16px;" onclick="addPrinterRow()">➕ Add Printer</button>
+                    <button class="btn-secondary" style="padding:10px 16px;" onclick="seedPrintersFromDefaults()">↺ Load Built-in List</button>
+                    <span id="printerSaveStatus" style="align-self:center; font-size:13px; color:#10b981;"></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===================== REMOTE PRINT TAB ===================== -->
+        <div id="tab-remote" class="tab-panel">
+            <div class="tool-section">
+                <div class="section-header">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"/></svg>
+                    <h1>Remote Print</h1>
+                </div>
+
+                <div class="conn-bar">
+                    <span><span class="conn-dot" id="connDotR"></span> <strong>Sync key</strong></span>
+                    <input type="text" id="syncKeyInputR" placeholder="e.g. genedx-intake" style="min-width:180px;">
+                    <button class="btn-primary" style="padding:8px 14px;" onclick="saveSyncKeyR()">Connect</button>
+                    <span id="connStatusR" style="font-size:13px; color:#6b7280;">Not connected</span>
+                </div>
+
+                <!-- Agent toggle: the device that actually talks to the printers -->
+                <div class="agent-toggle" id="agentToggle">
+                    <label class="switch"><input type="checkbox" id="agentCheckbox" onchange="toggleAgent()"><span class="slider"></span></label>
+                    <div>
+                        <div style="font-weight:700; font-size:16px;">🖨️ Act as print agent on THIS device</div>
+                        <div style="font-size:13px; opacity:.85;">Turn this ON only on the work computer that's on the printer network and has this page open. It will auto-print queued jobs. Leave OFF on your phone.</div>
+                    </div>
+                </div>
+
+                <!-- Quick job creator (handy from phone) -->
+                <div class="tool-section" style="padding:20px; box-shadow:none; border:1px solid #e5e7eb; margin-bottom:20px;">
+                    <h3 style="color:#374151; margin-bottom:14px;">➕ Queue a Quick Text Job</h3>
+                    <div class="form-group">
+                        <label for="qjPrinter">Printer</label>
+                        <select id="qjPrinter" style="width:100%; padding:10px; border:2px solid #d1d5db; border-radius:6px; font-size:14px;"></select>
+                    </div>
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label for="qjText">Label Text (one line per field)</label>
+                            <textarea id="qjText" rows="3" placeholder="Line 1&#10;Line 2" style="width:100%; padding:10px; border:2px solid #d1d5db; border-radius:6px; font-size:14px;"></textarea>
+                        </div>
+                        <div>
+                            <div class="form-group">
+                                <label for="qjBarcode">Barcode (optional)</label>
+                                <input type="text" id="qjBarcode" placeholder="digits only" style="width:100%; padding:10px; border:2px solid #d1d5db; border-radius:6px;">
+                            </div>
+                            <div class="form-group">
+                                <label for="qjCopies">Copies</label>
+                                <input type="number" id="qjCopies" value="1" min="1" max="50" style="width:100%; padding:10px; border:2px solid #d1d5db; border-radius:6px;">
+                            </div>
+                        </div>
+                    </div>
+                    <button class="btn-primary" style="padding:10px 16px;" onclick="queueQuickJob()">📡 Queue Job</button>
+                    <small style="color:#6b7280; display:block; margin-top:8px;">For labels with images/QR, design them in the 🏷️ Designer tab and use its "📡 Queue to Remote" button.</small>
+                </div>
+
+                <!-- Live queue -->
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                    <h3 style="color:#374151;">📋 Job Queue</h3>
+                    <button class="row-btn row-del" onclick="clearFinishedJobs()">Clear completed</button>
+                </div>
+                <div id="jobList"><p style="color:#9ca3af; font-size:14px;">No jobs yet.</p></div>
+
+                <h3 style="color:#374151; margin:20px 0 8px;">Agent Activity</h3>
+                <div class="log-box" id="agentLog">Agent idle. Toggle the switch above on the work computer to start printing queued jobs.</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ===== ZEBRA LABEL DESIGNER JAVASCRIPT =====
+        let imageZPL = '';
+        let previewImageData = '';
+        let imageWidth = 200;
+        let imageHeight = 200;
+        let imageX = 10;
+        let imageY = 50;
+        let imageScale = 1.0;
+        let isDragging = false;
+        let isResizing = false;
+        let dragStartX = 0;
+        let loadedImages = [];
+        let currentImageIndex = -1;
+        let dragStartY = 0;
+        let resizeStartX = 0;
+        let resizeStartY = 0;
+        let startScale = 1.0;
+        let qrcodeObj = null;
+
+        // Scheduled printing variables
+        let scheduledTimeout = null;
+        let intervalId = null;
+        let intervalCounter = 0;
+
+        // Batch printing variables
+        let batchQueue = [];
+        let draggedIndex = null;
+
+        function handleImageUpload(event) {
+            const files = event.target.files;
+            
+            if (files.length === 0) {
+                return;
+            }
+            
+            // Store all uploaded images
+            loadedImages = Array.from(files);
+            
+            if (loadedImages.length > 1) {
+                // Multiple images - show batch queue
+                document.getElementById('batchQueue').style.display = 'block';
+                document.getElementById('randomInfo').style.display = 'none';
+                document.getElementById('randomButton').style.display = 'none';
+                
+                // Add all images to batch queue
+                batchQueue = [];
+                loadedImages.forEach((file, index) => {
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        batchQueue.push({
+                            name: file.name,
+                            dataURL: e.target.result,
+                            index: index
+                        });
+                        
+                        if (batchQueue.length === loadedImages.length) {
+                            updateBatchDisplay();
+                        }
+                    };
+                    reader.readAsDataURL(file);
+                });
+            } else {
+                // Single image - use normal mode
+                document.getElementById('batchQueue').style.display = 'none';
+                document.getElementById('randomInfo').style.display = 'none';
+                document.getElementById('randomButton').style.display = 'none';
+                processImage(files[0]);
+            }
+        }
+
+        function updateBatchOffsetDisplay() {
+            const currentX = imageX;
+            const offset = parseInt(document.getElementById('batchOffsetX')?.value) || 0;
+            const finalX = currentX + offset; // No clamping
+            
+            const currentXDisplay = document.getElementById('currentXDisplay');
+            const calculatedXDisplay = document.getElementById('calculatedXDisplay');
+            
+            if (currentXDisplay) currentXDisplay.textContent = currentX;
+            if (calculatedXDisplay) {
+                if (finalX < 0) {
+                    calculatedXDisplay.textContent = `${finalX} (⚠️ ${Math.abs(finalX)} dots cut off left)`;
+                } else {
+                    calculatedXDisplay.textContent = finalX;
+                }
+            }
+        }
+
+        // Update display when offset changes
+        if (document.getElementById('batchOffsetX')) {
+            document.getElementById('batchOffsetX').addEventListener('input', updateBatchOffsetDisplay);
+        }
+
+        function updateBatchDisplay() {
+            const batchList = document.getElementById('batchList');
+            const batchCount = document.getElementById('batchCount');
+            
+            batchCount.textContent = batchQueue.length;
+            batchList.innerHTML = '';
+            
+            batchQueue.forEach((item, index) => {
+                const batchItem = document.createElement('div');
+                batchItem.className = 'batch-item';
+                batchItem.draggable = true;
+                batchItem.dataset.index = index;
+                batchItem.style.cssText = `
+                    display: flex;
+                    align-items: center;
+                    gap: 10px;
+                    padding: 10px;
+                    background: white;
+                    border: 2px solid #d1d5db;
+                    border-radius: 6px;
+                    cursor: move;
+                    transition: all 0.2s;
+                `;
+                
+                batchItem.innerHTML = `
+                    <span style="font-weight: bold; color: #6b7280; min-width: 30px;">#${index + 1}</span>
+                    <img src="${item.dataURL}" style="width: 50px; height: 50px; object-fit: cover; border-radius: 4px; border: 1px solid #d1d5db;">
+                    <span style="flex: 1; color: #374151; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${item.name}</span>
+                    <button onclick="removeFromBatch(${index})" style="padding: 4px 8px; background: #ef4444; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">❌</button>
+                `;
+                
+                // Drag events
+                batchItem.addEventListener('dragstart', function(e) {
+                    draggedIndex = index;
+                    batchItem.style.opacity = '0.5';
+                });
+                
+                batchItem.addEventListener('dragend', function(e) {
+                    batchItem.style.opacity = '1';
+                });
+                
+                batchItem.addEventListener('dragover', function(e) {
+                    e.preventDefault();
+                    batchItem.style.borderColor = '#10b981';
+                    batchItem.style.borderWidth = '3px';
+                });
+                
+                batchItem.addEventListener('dragleave', function(e) {
+                    batchItem.style.borderColor = '#d1d5db';
+                    batchItem.style.borderWidth = '2px';
+                });
+                
+                batchItem.addEventListener('drop', function(e) {
+                    e.preventDefault();
+                    batchItem.style.borderColor = '#d1d5db';
+                    batchItem.style.borderWidth = '2px';
+                    
+                    if (draggedIndex !== null && draggedIndex !== index) {
+                        // Reorder array
+                        const draggedItem = batchQueue[draggedIndex];
+                        batchQueue.splice(draggedIndex, 1);
+                        batchQueue.splice(index, 0, draggedItem);
+                        draggedIndex = null;
+                        updateBatchDisplay();
+                    }
+                });
+                
+                batchList.appendChild(batchItem);
+            });
+        }
+
+        function removeFromBatch(index) {
+            batchQueue.splice(index, 1);
+            if (batchQueue.length === 0) {
+                document.getElementById('batchQueue').style.display = 'none';
+                document.getElementById('imageUpload').value = '';
+                loadedImages = [];
+            } else {
+                updateBatchDisplay();
+            }
+        }
+
+        function clearBatchQueue() {
+            batchQueue = [];
+            loadedImages = [];
+            document.getElementById('batchQueue').style.display = 'none';
+            document.getElementById('imageUpload').value = '';
+            showStatus('Batch queue cleared');
+        }
+
+        async function printBatch() {
+            if (batchQueue.length === 0) {
+                showStatus('No images in batch queue', true);
+                return;
+            }
+            
+            const scheduleMode = document.querySelector('input[name="printSchedule"]:checked').value;
+            
+            // Save a copy of the current batch queue
+            const savedBatchQueue = JSON.parse(JSON.stringify(batchQueue));
+            
+            if (scheduleMode === 'scheduled') {
+                // Scheduled batch print
+                const dateStr = document.getElementById('scheduleDate').value;
+                const timeStr = document.getElementById('scheduleTime').value;
+                
+                if (!dateStr || !timeStr) {
+                    showStatus('Please set both date and time for scheduled batch printing', true);
+                    return;
+                }
+                
+                const scheduledDateTime = new Date(dateStr + 'T' + timeStr);
+                const now = new Date();
+                
+                if (scheduledDateTime <= now) {
+                    showStatus('Scheduled time must be in the future', true);
+                    return;
+                }
+                
+                const delay = scheduledDateTime - now;
+                
+                // Cancel any existing schedule
+                if (scheduledTimeout) {
+                    clearTimeout(scheduledTimeout);
+                }
+                
+                scheduledTimeout = setTimeout(() => {
+                    executeBatchPrint(savedBatchQueue);
+                    document.getElementById('scheduleStatus').style.display = 'none';
+                    scheduledTimeout = null;
+                }, delay);
+                
+                const options = { 
+                    year: 'numeric', 
+                    month: 'short', 
+                    day: 'numeric', 
+                    hour: '2-digit', 
+                    minute: '2-digit' 
+                };
+                document.getElementById('scheduleStatusText').textContent = 
+                    `Batch of ${savedBatchQueue.length} images at ` + scheduledDateTime.toLocaleString(undefined, options);
+                document.getElementById('scheduleStatus').style.display = 'block';
+                
+                showStatus(`Batch of ${savedBatchQueue.length} images scheduled!`);
+            } else if (scheduleMode === 'interval') {
+                // Interval batch print
+                const intervalValue = parseInt(document.getElementById('intervalValue').value);
+                const intervalUnit = document.getElementById('intervalUnit').value;
+                const maxRepeats = parseInt(document.getElementById('intervalRepeat').value);
+                
+                if (intervalValue < 1) {
+                    showStatus('Interval value must be at least 1', true);
+                    return;
+                }
+                
+                // Calculate interval in milliseconds
+                let intervalMs = intervalValue;
+                switch(intervalUnit) {
+                    case 'seconds':
+                        intervalMs *= 1000;
+                        break;
+                    case 'minutes':
+                        intervalMs *= 60 * 1000;
+                        break;
+                    case 'hours':
+                        intervalMs *= 60 * 60 * 1000;
+                        break;
+                    case 'days':
+                        intervalMs *= 24 * 60 * 60 * 1000;
+                        break;
+                }
+                
+                // Stop any existing interval
+                if (intervalId) {
+                    clearInterval(intervalId);
+                }
+                
+                intervalCounter = 0;
+                
+                // Start interval
+                intervalId = setInterval(() => {
+                    executeBatchPrint(savedBatchQueue);
+                    intervalCounter++;
+                    document.getElementById('intervalCount').textContent = intervalCounter;
+                    
+                    if (maxRepeats > 0 && intervalCounter >= maxRepeats) {
+                        stopInterval();
+                        showStatus(`Interval completed: ${intervalCounter} batches (${intervalCounter * savedBatchQueue.length} total prints)`);
+                    }
+                }, intervalMs);
+                
+                // Show status
+                const statusText = `Batch of ${savedBatchQueue.length} every ${intervalValue} ${intervalUnit}` + 
+                    (maxRepeats > 0 ? ` (max ${maxRepeats} times)` : ' (unlimited)');
+                document.getElementById('intervalStatusText').textContent = statusText;
+                document.getElementById('intervalStatus').style.display = 'block';
+                
+                showStatus('Interval batch printing started!');
+                
+                // Execute first batch immediately
+                executeBatchPrint(savedBatchQueue);
+                intervalCounter++;
+                document.getElementById('intervalCount').textContent = intervalCounter;
+            } else {
+                // Immediate batch print
+                executeBatchPrint(savedBatchQueue);
+            }
+        }
+
+        async function executeBatchPrint(queueToUse) {
+            // If no queue provided, use current batch queue
+            const queue = queueToUse || batchQueue;
+            
+            // Get batch offset - uses CURRENT imageX position - ALLOW NEGATIVE
+            const batchOffset = parseInt(document.getElementById('batchOffsetX').value) || 0;
+            const finalX = imageX + batchOffset; // No clamping - allow negative for cutoff
+            
+            console.log(`Starting batch print of ${queue.length} images with current X: ${imageX}, offset: ${batchOffset}, final X: ${finalX}`);
+            showStatus(`Printing batch of ${queue.length} images...`);
+            
+            let successCount = 0;
+            let errorCount = 0;
+            
+            // Process in groups of 4
+            const batchSize = 4;
+            for (let batchStart = 0; batchStart < queue.length; batchStart += batchSize) {
+                const batchEnd = Math.min(batchStart + batchSize, queue.length);
+                const currentBatch = queue.slice(batchStart, batchEnd);
+                
+                console.log(`Processing batch ${Math.floor(batchStart / batchSize) + 1}: images ${batchStart + 1}-${batchEnd}`);
+                
+                // Process all 4 images in parallel
+                const promises = currentBatch.map(async (item, index) => {
+                    const globalIndex = batchStart + index;
+                    console.log(`Processing image ${globalIndex + 1}/${queue.length}: ${item.name}`);
+                    
+                    try {
+                        // Load and convert image to ZPL independently
+                        const img = new Image();
+                        console.log(`Loading image ${globalIndex + 1}...`);
+                        const imageZPLData = await new Promise((resolve, reject) => {
+                            const timeout = setTimeout(() => {
+                                console.error(`Timeout loading image ${globalIndex + 1}`);
+                                reject(new Error('Image load timeout'));
+                            }, 5000);
+                            
+                            img.onload = function() {
+                                clearTimeout(timeout);
+                                console.log(`Image ${globalIndex + 1} loaded, converting to ZPL...`);
+                                try {
+                                    // Generate ZPL for THIS specific image with batch offset
+                                    const zpl = convertImageToZPLDirect(img, batchOffset);
+                                    console.log(`Image ${globalIndex + 1} converted to ZPL (${zpl.length} chars)`);
+                                    resolve(zpl);
+                                } catch (error) {
+                                    clearTimeout(timeout);
+                                    console.error(`Error converting image ${globalIndex + 1} to ZPL:`, error);
+                                    reject(error);
+                                }
+                            };
+                            
+                            img.onerror = function() {
+                                clearTimeout(timeout);
+                                console.error(`Failed to load image ${globalIndex + 1}: ${item.name}`);
+                                reject(new Error('Image load failed'));
+                            };
+                            
+                            img.src = item.dataURL;
+                        });
+                        
+                        console.log(`Generating complete ZPL for image ${globalIndex + 1}...`);
+                        // Generate complete ZPL with this image
+                        const completeZPL = generateZPLWithImage(imageZPLData);
+                        console.log(`Complete ZPL generated for image ${globalIndex + 1}, sending to printer...`);
+                        
+                        // Send to printer
+                        await sendZPLToPrinter(completeZPL);
+                        
+                        console.log(`Sent print ${globalIndex + 1} to printer`);
+                        successCount++;
+                        
+                    } catch (error) {
+                        console.error(`Error on image ${globalIndex + 1}:`, error);
+                        errorCount++;
+                    }
+                });
+                
+                // Wait for all 4 images in this batch to complete
+                await Promise.allSettled(promises);
+                
+                // Update preview with the last image from this batch (just for display)
+                const lastItem = currentBatch[currentBatch.length - 1];
+                const labelImage = document.getElementById('previewImageOnLabel');
+                labelImage.src = lastItem.dataURL;
+                labelImage.style.display = 'block';
+                
+                console.log(`Completed batch ${Math.floor(batchStart / batchSize) + 1}, moving to next batch immediately...`);
+                // NO DELAY - continue immediately to next batch
+            }
+            
+            console.log(`Batch complete! Success: ${successCount}, Errors: ${errorCount}`);
+            
+            if (errorCount > 0) {
+                showStatus(`Batch complete! Sent ${successCount}/${queue.length} images (${errorCount} failed)`, true);
+            } else {
+                showStatus(`Batch complete! Sent ${queue.length} images to printer.`);
+            }
+        }
+
+        function convertImageToZPLDirect(img, offsetX = 0) {
+            // Create a temporary canvas for this specific image
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+            const actualPrintWidth = 400;
+            const baseImageX = imageX + offsetX;
+            
+            // Calculate how much to crop from the left if position would be negative
+            const leftCropDots = baseImageX < 0 ? Math.abs(baseImageX) : 0;
+            const finalImageX = Math.max(0, baseImageX); // Actual print position (0 or positive)
+            
+            const maxSafeWidth = actualPrintWidth - finalImageX - 20;
+            
+            const desiredWidth = 200 * imageScale;
+            const width = Math.min(desiredWidth, maxSafeWidth, 350);
+            const scale = width / img.width;
+            const height = img.height * scale;
+
+            // Full canvas size before cropping
+            const fullWidth = Math.floor(width);
+            const fullHeight = Math.floor(height);
+
+            // Create full-size canvas first
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = fullWidth;
+            tempCanvas.height = fullHeight;
+            const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
+            tempCtx.drawImage(img, 0, 0, fullWidth, fullHeight);
+
+            // Now crop if needed
+            const croppedWidth = Math.max(1, fullWidth - leftCropDots);
+            canvas.width = croppedWidth;
+            canvas.height = fullHeight;
+
+            // Copy the non-cropped portion (skip leftCropDots pixels from the left)
+            if (leftCropDots > 0) {
+                ctx.drawImage(tempCanvas, leftCropDots, 0, croppedWidth, fullHeight, 0, 0, croppedWidth, fullHeight);
+            } else {
+                ctx.drawImage(tempCanvas, 0, 0);
+            }
+
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const pixels = imageData.data;
+
+            const bytesPerRow = Math.ceil(canvas.width / 8);
+            const totalBytes = bytesPerRow * canvas.height;
+            let hexString = '';
+
+            for (let y = 0; y < canvas.height; y++) {
+                for (let x = 0; x < bytesPerRow; x++) {
+                    let byte = 0;
+                    for (let bit = 0; bit < 8; bit++) {
+                        const pixelX = x * 8 + bit;
+                        if (pixelX < canvas.width) {
+                            const index = (y * canvas.width + pixelX) * 4;
+                            const r = pixels[index];
+                            const g = pixels[index + 1];
+                            const b = pixels[index + 2];
+                            
+                            const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+                            
+                            if (gray < 128) {
+                                byte |= (1 << (7 - bit));
+                            }
+                        }
+                    }
+                    hexString += byte.toString(16).padStart(2, '0').toUpperCase();
+                }
+            }
+
+            const cutoffWarning = leftCropDots > 0 ? ` (cropped ${leftCropDots} dots from left)` : '';
+            console.log(`Generated ZPL for image: ${canvas.width}x${canvas.height}, ${totalBytes} bytes, X offset: ${offsetX}, final X: ${finalImageX}${cutoffWarning}`);
+            return `^FO${finalImageX},${imageY}^GFA,${totalBytes},${totalBytes},${bytesPerRow},${hexString}^FS`;
+        }
+
+        function generateZPLWithImage(imageZPLData) {
+            const labelTextInput = document.getElementById('labelText').value || 'SAMPLE TEXT';
+            let barcodeData = document.getElementById('barcodeData').value;
+            const dotText = document.getElementById('dotText').value;
+            const copies = document.getElementById('copies').value || 1;
+            const printMode = document.querySelector('input[name="printMode"]:checked').value;
+
+            if (barcodeData) {
+                barcodeData = barcodeData.replace(/[\s-]/g, '');
+                
+                if (barcodeData.length === 34) {
+                    barcodeData = barcodeData.substring(22, 34);
+                } else if (barcodeData.length > 12) {
+                    barcodeData = barcodeData.slice(-12);
+                }
+                
+                barcodeData = barcodeData.replace(/\D/g, '');
+            }
+
+            const lines = labelTextInput.split('\n').filter(line => line.trim() !== '');
+            
+            let yPosition = imageZPLData ? 260 : 50;
+            
+            let textCommands = '';
+            lines.forEach((line, index) => {
+                textCommands += `^FO50,${yPosition}^A0N,30,30^FD${line.trim()}^FS\n`;
+                yPosition += 35;
+            });
+
+            let barcodeSection = '';
+            if (barcodeData) {
+                const maxWidth = 380;
+                const barcodeLength = barcodeData.length;
+                const estimatedWidth = (barcodeLength * 11 + 35);
+                let barWidth = (maxWidth / estimatedWidth).toFixed(3);
+                
+                barWidth = Math.max(1.0, Math.min(2.5, parseFloat(barWidth)));
+                
+                barcodeSection = `^FO20,${yPosition + 10}^BY${barWidth}^BCN,68,N,N,N^FD${barcodeData}^FS`;
+            }
+
+            const dotTextSection = (dotText && printMode === 'extended')
+                ? `^FO470,90^A0N,35,35^FD${dotText}^FS`
+                : '';
+
+            const labelHeight = Math.max(200, yPosition + (barcodeData ? 100 : 40));
+            const imageSection = imageZPLData ? `\n${imageZPLData}\n` : '';
+
+            const printWidth = printMode === 'extended' ? 550 : 400;
+
+            const zpl = `^XA
+^PW${printWidth}
+^LL${labelHeight}
+${imageSection}
+${dotTextSection}
+${textCommands}
+${barcodeSection}
+^PQ${copies}
+^XZ`;
+            return zpl;
+        }
+
+        async function sendZPLToPrinter(zpl) {
+            let printerIP = document.getElementById('printerIP').value;
+            const port = document.getElementById('port').value;
+
+            printerIP = printerIP.split('.').map(octet => {
+                const num = parseInt(octet, 10);
+                if (octet.length === 2 && octet[0] === '0') {
+                    return '0' + num;
+                }
+                if (octet.length === 3 && octet[0] === '0') {
+                    return num.toString();
+                }
+                return num.toString();
+            }).join('.');
+
+            // Longer random delay to spread out the 4 simultaneous requests
+            const randomDelay = Math.floor(Math.random() * 400); // 0-400ms spread
+            
+            return new Promise((resolve) => {
+                setTimeout(() => {
+                    fetch(`http://${printerIP}:${port}`, {
+                        method: 'POST',
+                        body: zpl,
+                        headers: {
+                            'Content-Type': 'text/plain',
+                            'X-Request-ID': Date.now() + '-' + Math.random().toString(36).substr(2, 9)
+                        },
+                        mode: 'no-cors',
+                        cache: 'no-cache',
+                        keepalive: true
+                    }).catch((error) => {
+                        console.error('Print error:', error);
+                    });
+                    
+                    // Wait 1 second to ensure the request is sent before resolving
+                    // (no-cors mode can't verify delivery, so we just wait to be safe)
+                    setTimeout(() => resolve(true), 1000);
+                }, randomDelay);
+            });
+        }
+
+        function selectRandomImage() {
+            if (loadedImages.length === 0) return;
+            
+            let newIndex;
+            if (loadedImages.length === 1) {
+                newIndex = 0;
+            } else {
+                do {
+                    newIndex = Math.floor(Math.random() * loadedImages.length);
+                } while (newIndex === currentImageIndex && loadedImages.length > 1);
+            }
+            
+            currentImageIndex = newIndex;
+            const selectedFile = loadedImages[newIndex];
+            
+            document.getElementById('currentImageName').textContent = '🎲 Mystery image selected!';
+            
+            processImage(selectedFile, true);
+        }
+
+        function updateScheduleMode() {
+            const mode = document.querySelector('input[name="printSchedule"]:checked').value;
+            
+            document.getElementById('scheduledOptions').style.display = 'none';
+            document.getElementById('intervalOptions').style.display = 'none';
+            document.getElementById('scheduleStatus').style.display = 'none';
+            document.getElementById('intervalStatus').style.display = 'none';
+            
+            if (mode === 'scheduled') {
+                document.getElementById('scheduledOptions').style.display = 'block';
+                
+                // Set default to current date and time + 1 minute
+                const now = new Date();
+                now.setMinutes(now.getMinutes() + 1);
+                
+                const dateStr = now.toISOString().split('T')[0];
+                const timeStr = now.toTimeString().slice(0, 5);
+                
+                document.getElementById('scheduleDate').value = dateStr;
+                document.getElementById('scheduleTime').value = timeStr;
+            } else if (mode === 'interval') {
+                document.getElementById('intervalOptions').style.display = 'block';
+            }
+        }
+
+        function cancelSchedule() {
+            if (scheduledTimeout) {
+                clearTimeout(scheduledTimeout);
+                scheduledTimeout = null;
+            }
+            document.getElementById('scheduleStatus').style.display = 'none';
+            showStatus('Scheduled print cancelled');
+        }
+
+        function stopInterval() {
+            if (intervalId) {
+                clearInterval(intervalId);
+                intervalId = null;
+            }
+            intervalCounter = 0;
+            document.getElementById('intervalStatus').style.display = 'none';
+            document.getElementById('intervalCount').textContent = '0';
+            showStatus('Interval printing stopped');
+        }
+
+        function executePrint() {
+            const zpl = generateZPL();
+            let printerIP = document.getElementById('printerIP').value;
+            const port = document.getElementById('port').value;
+
+            printerIP = printerIP.split('.').map(octet => {
+                const num = parseInt(octet, 10);
+                if (octet.length === 2 && octet[0] === '0') {
+                    return '0' + num;
+                }
+                if (octet.length === 3 && octet[0] === '0') {
+                    return num.toString();
+                }
+                return num.toString();
+            }).join('.');
+
+            // Add random delay to prevent simultaneous requests
+            const randomDelay = Math.floor(Math.random() * 200);
+            
+            setTimeout(() => {
+                fetch(`http://${printerIP}:${port}`, {
+                    method: 'POST',
+                    body: zpl,
+                    headers: {
+                        'Content-Type': 'text/plain',
+                        'X-Request-ID': Date.now() + '-' + Math.random().toString(36).substr(2, 9)
+                    },
+                    mode: 'no-cors',
+                    cache: 'no-cache',
+                    keepalive: true
+                }).then(() => {
+                    return true;
+                }).catch(error => {
+                    console.error('Print error:', error);
+                    return false;
+                });
+            }, randomDelay);
+        }
+
+        function updatePreview() {
+            const labelText = document.getElementById('labelText').value || '';
+            let barcodeData = document.getElementById('barcodeData').value || '';
+            const dotText = document.getElementById('dotText').value || '';
+            const printMode = document.querySelector('input[name="printMode"]:checked')?.value || 'standard';
+            
+            if (barcodeData) {
+                barcodeData = barcodeData.replace(/[\s-]/g, '');
+                
+                if (barcodeData.length === 34) {
+                    barcodeData = barcodeData.substring(22, 34);
+                } else if (barcodeData.length > 12) {
+                    barcodeData = barcodeData.slice(-12);
+                }
+                
+                barcodeData = barcodeData.replace(/\D/g, '');
+            }
+            
+            const dotTextPreview = document.getElementById('previewDotText');
+            dotTextPreview.textContent = dotText;
+            
+            if (printMode === 'extended' && dotText) {
+                dotTextPreview.style.display = 'flex';
+            } else {
+                dotTextPreview.style.display = 'none';
+            }
+            
+            const textLines = labelText.split('\n').filter(line => line.trim() !== '');
+            const textPreview = document.getElementById('previewTextOnLabel');
+            textPreview.textContent = textLines.join('\n');
+            textPreview.style.top = '60px';
+            
+            const barcodePreview = document.getElementById('previewBarcodeOnLabel');
+            if (barcodeData) {
+                barcodePreview.textContent = barcodeData;
+                const textHeight = textLines.length * 24;
+                barcodePreview.style.top = (60 + textHeight + 30) + 'px';
+                barcodePreview.style.display = 'block';
+            } else {
+                barcodePreview.style.display = 'none';
+            }
+        }
+
+        function setupImageInteraction() {
+            const labelImage = document.getElementById('previewImageOnLabel');
+            const resizeHandle = document.getElementById('imageResizeHandle');
+            const labelPreview = document.getElementById('labelPreview');
+
+            labelImage.addEventListener('mousedown', function(e) {
+                if (e.target === labelImage) {
+                    isDragging = true;
+                    dragStartX = e.clientX - labelImage.offsetLeft;
+                    dragStartY = e.clientY - labelImage.offsetTop;
+                    labelImage.classList.add('dragging');
+                    e.preventDefault();
+                }
+            });
+
+            resizeHandle.addEventListener('mousedown', function(e) {
+                isResizing = true;
+                resizeStartX = e.clientX;
+                resizeStartY = e.clientY;
+                startScale = imageScale;
+                e.preventDefault();
+                e.stopPropagation();
+            });
+
+            document.addEventListener('mousemove', function(e) {
+                if (isDragging) {
+                    const newLeft = e.clientX - dragStartX;
+                    const newTop = e.clientY - dragStartY;
+                    
+                    labelImage.style.left = newLeft + 'px';
+                    labelImage.style.top = newTop + 'px';
+                    
+                    const previewRect = labelPreview.getBoundingClientRect();
+                    const imageRect = labelImage.getBoundingClientRect();
+                    
+                    imageX = Math.round((imageRect.left - previewRect.left - 15) / 1.5);
+                    imageY = Math.round((imageRect.top - previewRect.top - 15 + 45) / 0.9);
+                    
+                    document.getElementById('imageX').value = imageX;
+                    document.getElementById('imageY').value = imageY;
+                    
+                    updateResizeHandle();
+                    checkImageCutoff();
+                }
+                
+                if (isResizing) {
+                    const deltaX = e.clientX - resizeStartX;
+                    const deltaY = e.clientY - resizeStartY;
+                    const delta = (deltaX + deltaY) / 2;
+                    
+                    imageScale = Math.max(0.1, Math.min(2.0, startScale + (delta / 200)));
+                    
+                    labelImage.style.maxWidth = (200 * imageScale) + 'px';
+                    labelImage.style.maxHeight = (200 * imageScale) + 'px';
+                    
+                    document.getElementById('imageScale').value = Math.round(imageScale * 100);
+                    document.getElementById('scaleValue').textContent = Math.round(imageScale * 100) + '%';
+                    
+                    updateResizeHandle();
+                    checkImageCutoff();
+                }
+            });
+
+            document.addEventListener('mouseup', function() {
+                if (isDragging) {
+                    isDragging = false;
+                    labelImage.classList.remove('dragging');
+                    
+                    if (previewImageData) {
+                        const img = new Image();
+                        img.onload = function() {
+                            convertImageToZPL(img);
+                        };
+                        img.src = previewImageData;
+                    }
+                }
+                
+                if (isResizing) {
+                    isResizing = false;
+                    
+                    if (previewImageData) {
+                        const img = new Image();
+                        img.onload = function() {
+                            convertImageToZPL(img);
+                        };
+                        img.src = previewImageData;
+                    }
+                }
+            });
+            
+            labelImage.addEventListener('mouseenter', function() {
+                if (previewImageData) {
+                    resizeHandle.style.display = 'block';
+                    updateResizeHandle();
+                }
+            });
+            
+            labelPreview.addEventListener('mouseleave', function() {
+                if (!isResizing) {
+                    resizeHandle.style.display = 'none';
+                }
+            });
+        }
+
+        function updateResizeHandle() {
+            const labelImage = document.getElementById('previewImageOnLabel');
+            const resizeHandle = document.getElementById('imageResizeHandle');
+            
+            if (labelImage.style.display !== 'none') {
+                const rect = labelImage.getBoundingClientRect();
+                const parentRect = labelImage.parentElement.getBoundingClientRect();
+                
+                resizeHandle.style.left = (rect.right - parentRect.left - 6) + 'px';
+                resizeHandle.style.top = (rect.bottom - parentRect.top - 6) + 'px';
+            }
+        }
+
+        function updateImagePosition() {
+            imageX = parseInt(document.getElementById('imageX').value) || 10;
+            imageY = parseInt(document.getElementById('imageY').value) || 50;
+            
+            const labelImage = document.getElementById('previewImageOnLabel');
+            labelImage.style.left = (imageX * 1.5 + 15) + 'px';
+            labelImage.style.top = (imageY * 0.9 + 15 - 45) + 'px';
+            
+            updateResizeHandle();
+            
+            if (previewImageData) {
+                const img = new Image();
+                img.onload = function() {
+                    convertImageToZPL(img);
+                };
+                img.src = previewImageData;
+            }
+            checkImageCutoff();
+        }
+
+        function updateImageScale() {
+            const scalePercent = parseInt(document.getElementById('imageScale').value);
+            imageScale = scalePercent / 100;
+            document.getElementById('scaleValue').textContent = scalePercent + '%';
+            
+            const labelImage = document.getElementById('previewImageOnLabel');
+            labelImage.style.maxWidth = (200 * imageScale) + 'px';
+            labelImage.style.maxHeight = (200 * imageScale) + 'px';
+            
+            updateResizeHandle();
+            
+            if (previewImageData) {
+                const img = new Image();
+                img.onload = function() {
+                    convertImageToZPL(img);
+                };
+                img.src = previewImageData;
+            }
+            checkImageCutoff();
+        }
+
+        function handleImageUpload(event) {
+            const files = event.target.files;
+            
+            if (files.length === 0) {
+                return;
+            }
+            
+            // Store all uploaded images
+            loadedImages = Array.from(files);
+            
+            if (loadedImages.length > 1) {
+                // Multiple images - show batch queue
+                document.getElementById('batchQueue').style.display = 'block';
+                document.getElementById('randomInfo').style.display = 'none';
+                document.getElementById('randomButton').style.display = 'none';
+                
+                // Add all images to batch queue
+                batchQueue = [];
+                loadedImages.forEach((file, index) => {
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        batchQueue.push({
+                            name: file.name,
+                            dataURL: e.target.result,
+                            index: index
+                        });
+                        
+                        if (batchQueue.length === loadedImages.length) {
+                            updateBatchDisplay();
+                        }
+                    };
+                    reader.readAsDataURL(file);
+                });
+            } else {
+                // Single image - use normal mode
+                document.getElementById('batchQueue').style.display = 'none';
+                document.getElementById('randomInfo').style.display = 'none';
+                document.getElementById('randomButton').style.display = 'none';
+                processImage(files[0]);
+            }
+        }
+
+        function processImage(file, hidePreview = false) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const img = new Image();
+                img.onload = function() {
+                    convertImageToZPL(img);
+                    
+                    if (hidePreview) {
+                        document.getElementById('previewImg').style.display = 'none';
+                        document.getElementById('imagePreview').innerHTML = '<div style="width: 200px; height: 200px; border: 2px solid #d1d5db; border-radius: 8px; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #e0e7ff 0%, #c7d2fe 100%); font-size: 80px;">❓</div><button onclick="clearImage()" style="margin-left: 10px; padding: 6px 12px; background: #ef4444; color: white; border: none; border-radius: 4px; cursor: pointer;">Remove</button>';
+                        document.getElementById('imagePreview').style.display = 'block';
+                        
+                        const labelImage = document.getElementById('previewImageOnLabel');
+                        labelImage.style.display = 'none';
+                    } else {
+                        document.getElementById('previewImg').src = e.target.result;
+                        document.getElementById('previewImg').style.display = 'block';
+                        document.getElementById('imagePreview').innerHTML = '<img id="previewImg" src="' + e.target.result + '" style="max-width: 200px; border: 2px solid #d1d5db; border-radius: 8px;"><button onclick="clearImage()" style="margin-left: 10px; padding: 6px 12px; background: #ef4444; color: white; border: none; border-radius: 4px; cursor: pointer;">Remove</button>';
+                        document.getElementById('imagePreview').style.display = 'block';
+                        
+                        const labelImage = document.getElementById('previewImageOnLabel');
+                        labelImage.src = e.target.result;
+                        labelImage.style.display = 'block';
+                        labelImage.style.left = (imageX * 1.5 + 15) + 'px';
+                        labelImage.style.top = (imageY * 0.9 + 15 - 45) + 'px';
+                        labelImage.style.maxWidth = (200 * imageScale) + 'px';
+                        labelImage.style.maxHeight = (200 * imageScale) + 'px';
+                    }
+                    
+                    document.getElementById('imageControls').style.display = 'block';
+                    
+                    previewImageData = e.target.result;
+                    
+                    updateResizeHandle();
+                    updatePreview();
+                    checkImageCutoff();
+                };
+                img.src = e.target.result;
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function selectRandomImage() {
+            if (loadedImages.length === 0) return;
+            
+            let newIndex;
+            if (loadedImages.length === 1) {
+                newIndex = 0;
+            } else {
+                do {
+                    newIndex = Math.floor(Math.random() * loadedImages.length);
+                } while (newIndex === currentImageIndex && loadedImages.length > 1);
+            }
+            
+            currentImageIndex = newIndex;
+            const selectedFile = loadedImages[newIndex];
+            
+            document.getElementById('currentImageName').textContent = '🎲 Mystery image selected!';
+            
+            processImage(selectedFile, true);
+        }
+
+        function convertImageToZPL(img) {
+            const canvas = document.getElementById('imageCanvas');
+            const ctx = canvas.getContext('2d');
+
+            const actualPrintWidth = 400;
+            const maxSafeWidth = actualPrintWidth - imageX - 20;
+            
+            const desiredWidth = 200 * imageScale;
+            const width = Math.min(desiredWidth, maxSafeWidth, 350);
+            const scale = width / img.width;
+            const height = img.height * scale;
+
+            canvas.width = Math.floor(width);
+            canvas.height = Math.floor(height);
+
+            imageWidth = canvas.width;
+            imageHeight = canvas.height;
+
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const pixels = imageData.data;
+
+            const bytesPerRow = Math.ceil(canvas.width / 8);
+            const totalBytes = bytesPerRow * canvas.height;
+            let hexString = '';
+
+            for (let y = 0; y < canvas.height; y++) {
+                for (let x = 0; x < bytesPerRow; x++) {
+                    let byte = 0;
+                    for (let bit = 0; bit < 8; bit++) {
+                        const pixelX = x * 8 + bit;
+                        if (pixelX < canvas.width) {
+                            const index = (y * canvas.width + pixelX) * 4;
+                            const r = pixels[index];
+                            const g = pixels[index + 1];
+                            const b = pixels[index + 2];
+                            
+                            const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+                            
+                            if (gray < 128) {
+                                byte |= (1 << (7 - bit));
+                            }
+                        }
+                    }
+                    hexString += byte.toString(16).padStart(2, '0').toUpperCase();
+                }
+            }
+
+            imageZPL = `^FO${imageX},${imageY}^GFA,${totalBytes},${totalBytes},${bytesPerRow},${hexString}^FS`;
+            
+            showStatus('Image converted successfully!');
+        }
+
+        function clearImage() {
+            imageZPL = '';
+            previewImageData = '';
+            loadedImages = [];
+            currentImageIndex = -1;
+            
+            document.getElementById('imageUpload').value = '';
+            document.getElementById('imagePreview').style.display = 'none';
+            document.getElementById('imageControls').style.display = 'none';
+            document.getElementById('previewImageOnLabel').style.display = 'none';
+            document.getElementById('imageResizeHandle').style.display = 'none';
+            document.getElementById('randomInfo').style.display = 'none';
+            document.getElementById('randomButton').style.display = 'none';
+            
+            imageX = 10;
+            imageY = 50;
+            imageScale = 1.0;
+            document.getElementById('imageX').value = 10;
+            document.getElementById('imageY').value = 50;
+            document.getElementById('imageScale').value = 100;
+            document.getElementById('scaleValue').textContent = '100%';
+            
+            updatePreview();
+            showStatus('Image removed');
+        }
+
+        window.addEventListener('load', function() {
+            validateIP();
+            setupImageInteraction();
+        });
+
+        function validateIP() {
+            let printerIP = document.getElementById('printerIP').value;
+            const cleanIP = printerIP.split('.').map(octet => {
+                const num = parseInt(octet, 10);
+                if (octet.length === 2 && octet[0] === '0') {
+                    return '0' + num;
+                }
+                if (octet.length === 3 && octet[0] === '0') {
+                    return num.toString();
+                }
+                return num.toString();
+            }).join('.');
+            document.getElementById('ipDisplay').textContent = 'Will use: ' + cleanIP;
+        }
+
+        function generateZPL() {
+            const labelTextInput = document.getElementById('labelText').value || 'SAMPLE TEXT';
+            let barcodeData = document.getElementById('barcodeData').value;
+            const dotText = document.getElementById('dotText').value;
+            const copies = document.getElementById('copies').value || 1;
+            const printMode = document.querySelector('input[name="printMode"]:checked').value;
+
+            if (barcodeData) {
+                barcodeData = barcodeData.replace(/[\s-]/g, '');
+                
+                if (barcodeData.length === 34) {
+                    barcodeData = barcodeData.substring(22, 34);
+                } else if (barcodeData.length > 12) {
+                    barcodeData = barcodeData.slice(-12);
+                }
+                
+                barcodeData = barcodeData.replace(/\D/g, '');
+            }
+
+            const lines = labelTextInput.split('\n').filter(line => line.trim() !== '');
+            
+            let yPosition = imageZPL ? 260 : 50;
+            
+            let textCommands = '';
+            lines.forEach((line, index) => {
+                textCommands += `^FO50,${yPosition}^A0N,30,30^FD${line.trim()}^FS\n`;
+                yPosition += 35;
+            });
+
+            let barcodeSection = '';
+            if (barcodeData) {
+                const maxWidth = 380;
+                const barcodeLength = barcodeData.length;
+                const estimatedWidth = (barcodeLength * 11 + 35);
+                let barWidth = (maxWidth / estimatedWidth).toFixed(3);
+                
+                barWidth = Math.max(1.0, Math.min(2.5, parseFloat(barWidth)));
+                
+                barcodeSection = `^FO20,${yPosition + 10}^BY${barWidth}^BCN,68,N,N,N^FD${barcodeData}^FS`;
+            }
+
+            const dotTextSection = (dotText && printMode === 'extended')
+                ? `^FO470,90^A0N,35,35^FD${dotText}^FS`
+                : '';
+
+            const labelHeight = Math.max(200, yPosition + (barcodeData ? 100 : 40));
+            const imageSection = imageZPL ? `\n${imageZPL}\n` : '';
+
+            const printWidth = printMode === 'extended' ? 550 : 400;
+
+            const zpl = `^XA
+^PW${printWidth}
+^LL${labelHeight}
+${imageSection}
+${dotTextSection}
+${textCommands}
+${barcodeSection}
+^PQ${copies}
+^XZ`;
+            return zpl;
+        }
+
+        function showStatus(message, isError = false) {
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = message;
+            statusEl.className = 'status show ' + (isError ? 'error' : 'success');
+            
+            setTimeout(() => {
+                statusEl.classList.remove('show');
+            }, 5000);
+        }
+
+        async function sendToPrinter() {
+            const scheduleMode = document.querySelector('input[name="printSchedule"]:checked').value;
+            
+            if (scheduleMode === 'now') {
+                // Immediate print
+                const zpl = generateZPL();
+                let printerIP = document.getElementById('printerIP').value;
+                const port = document.getElementById('port').value;
+
+                printerIP = printerIP.split('.').map(octet => {
+                    const num = parseInt(octet, 10);
+                    if (octet.length === 2 && octet[0] === '0') {
+                        return '0' + num;
+                    }
+                    if (octet.length === 3 && octet[0] === '0') {
+                        return num.toString();
+                    }
+                    return num.toString();
+                }).join('.');
+
+                try {
+                    showStatus('Sending to printer...');
+                    
+                    // Add random delay to prevent browser connection limit
+                    const randomDelay = Math.floor(Math.random() * 200);
+                    
+                    setTimeout(async () => {
+                        const response = await fetch(`http://${printerIP}:${port}`, {
+                            method: 'POST',
+                            body: zpl,
+                            headers: {
+                                'Content-Type': 'text/plain',
+                                'X-Request-ID': Date.now() + '-' + Math.random().toString(36).substr(2, 9)
+                            },
+                            mode: 'no-cors',
+                            cache: 'no-cache',
+                            keepalive: true
+                        });
+                        
+                        showStatus('Print job sent! (Check printer)');
+                    }, randomDelay);
+                } catch (error) {
+                    showStatus('Error: ' + error.message + '. Try downloading the ZPL file instead.', true);
+                    console.error('Print error:', error);
+                }
+            } else if (scheduleMode === 'scheduled') {
+                // Scheduled print
+                const dateStr = document.getElementById('scheduleDate').value;
+                const timeStr = document.getElementById('scheduleTime').value;
+                
+                if (!dateStr || !timeStr) {
+                    showStatus('Please set both date and time for scheduled printing', true);
+                    return;
+                }
+                
+                const scheduledDateTime = new Date(dateStr + 'T' + timeStr);
+                const now = new Date();
+                
+                if (scheduledDateTime <= now) {
+                    showStatus('Scheduled time must be in the future', true);
+                    return;
+                }
+                
+                const delay = scheduledDateTime - now;
+                
+                // Cancel any existing schedule
+                if (scheduledTimeout) {
+                    clearTimeout(scheduledTimeout);
+                }
+                
+                scheduledTimeout = setTimeout(() => {
+                    executePrint();
+                    showStatus('Scheduled print executed!');
+                    document.getElementById('scheduleStatus').style.display = 'none';
+                    scheduledTimeout = null;
+                }, delay);
+                
+                const options = { 
+                    year: 'numeric', 
+                    month: 'short', 
+                    day: 'numeric', 
+                    hour: '2-digit', 
+                    minute: '2-digit' 
+                };
+                document.getElementById('scheduleStatusText').textContent = 
+                    scheduledDateTime.toLocaleString(undefined, options);
+                document.getElementById('scheduleStatus').style.display = 'block';
+                
+                showStatus('Print scheduled successfully!');
+            } else if (scheduleMode === 'interval') {
+                // Interval print
+                const intervalValue = parseInt(document.getElementById('intervalValue').value);
+                const intervalUnit = document.getElementById('intervalUnit').value;
+                const maxRepeats = parseInt(document.getElementById('intervalRepeat').value);
+                
+                if (intervalValue < 1) {
+                    showStatus('Interval value must be at least 1', true);
+                    return;
+                }
+                
+                // Calculate interval in milliseconds
+                let intervalMs = intervalValue;
+                switch(intervalUnit) {
+                    case 'seconds':
+                        intervalMs *= 1000;
+                        break;
+                    case 'minutes':
+                        intervalMs *= 60 * 1000;
+                        break;
+                    case 'hours':
+                        intervalMs *= 60 * 60 * 1000;
+                        break;
+                    case 'days':
+                        intervalMs *= 24 * 60 * 60 * 1000;
+                        break;
+                }
+                
+                // Stop any existing interval
+                if (intervalId) {
+                    clearInterval(intervalId);
+                }
+                
+                intervalCounter = 0;
+                
+                // Start interval
+                intervalId = setInterval(() => {
+                    executePrint();
+                    intervalCounter++;
+                    document.getElementById('intervalCount').textContent = intervalCounter;
+                    
+                    if (maxRepeats > 0 && intervalCounter >= maxRepeats) {
+                        stopInterval();
+                        showStatus(`Interval completed: ${intervalCounter} prints sent`);
+                    }
+                }, intervalMs);
+                
+                // Show status
+                const statusText = `Every ${intervalValue} ${intervalUnit}` + 
+                    (maxRepeats > 0 ? ` (max ${maxRepeats} times)` : ' (unlimited)');
+                document.getElementById('intervalStatusText').textContent = statusText;
+                document.getElementById('intervalStatus').style.display = 'block';
+                
+                showStatus('Interval printing started!');
+                
+                // Execute first print immediately
+                executePrint();
+                intervalCounter++;
+                document.getElementById('intervalCount').textContent = intervalCounter;
+            }
+        }
+
+        function downloadZPL() {
+            const zpl = generateZPL();
+            const blob = new Blob([zpl], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'label.zpl';
+            a.click();
+            URL.revokeObjectURL(url);
+            showStatus('ZPL file downloaded!');
+        }
+
+        function checkImageCutoff() {
+            const labelImage = document.getElementById('previewImageOnLabel');
+            const cutoffLine = document.getElementById('cutoffLine');
+            const cutoffWarning = document.getElementById('cutoffWarning');
+            
+            if (!previewImageData) {
+                cutoffLine.style.display = 'none';
+                cutoffWarning.style.display = 'none';
+                return;
+            }
+            
+            const maxLabelHeight = 270 - 92;
+            const imageTop = parseFloat(labelImage.style.top) || 40;
+            const imageHeight = labelImage.offsetHeight;
+            const imageBottom = imageTop - 15;
+            
+            if (imageBottom + imageHeight > maxLabelHeight) {
+                cutoffLine.style.top = (15 + maxLabelHeight) + 'px';
+                cutoffLine.style.display = 'block';
+                
+                cutoffWarning.style.display = 'block';
+                cutoffWarning.style.left = labelImage.style.left;
+                cutoffWarning.style.top = (15 + maxLabelHeight + 5) + 'px';
+            } else {
+                cutoffLine.style.display = 'none';
+                cutoffWarning.style.display = 'none';
+            }
+        }
+
+        function updatePrintMode() {
+            const mode = document.querySelector('input[name="printMode"]:checked').value;
+            const imageControls = document.getElementById('imageControls');
+            const modeIndicator = document.getElementById('modeIndicator');
+            const dotTextPreview = document.getElementById('previewDotText');
+            const dotText = document.getElementById('dotText').value;
+            
+            if (mode === 'extended') {
+                modeIndicator.textContent = 'EXTENDED MODE';
+                modeIndicator.className = 'mode-indicator extended';
+                
+                if (dotText) {
+                    dotTextPreview.style.display = 'flex';
+                }
+                
+                if (imageControls.style.display !== 'none') {
+                    showStatus('Warning: In Extended Mode, resizing images may cause skewing!', true);
+                }
+            } else {
+                modeIndicator.textContent = 'STANDARD MODE';
+                modeIndicator.className = 'mode-indicator standard';
+                
+                dotTextPreview.style.display = 'none';
+            }
+        }
+
+        // ===== QR CODE GENERATOR JAVASCRIPT =====
+        function generateQR() {
+            const text = document.getElementById('qrText').value.trim();
+            
+            if (!text) {
+                alert('Please enter some text or a URL!');
+                return;
+            }
+
+            const qrcodeDiv = document.getElementById('qrcode');
+            qrcodeDiv.innerHTML = '';
+
+            const tempDiv = document.createElement('div');
+            
+            qrcodeObj = new QRCode(tempDiv, {
+                text: text,
+                width: 300,
+                height: 255,
+                colorDark: "#000000",
+                colorLight: "#ffffff",
+                correctLevel: QRCode.CorrectLevel.L
+            });
+
+            setTimeout(() => {
+                const originalCanvas = tempDiv.querySelector('canvas');
+                if (originalCanvas) {
+                    const newCanvas = document.createElement('canvas');
+                    newCanvas.width = 400;
+                    newCanvas.height = 355;
+                    const ctx = newCanvas.getContext('2d');
+                    
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillRect(0, 0, 400, 355);
+                    
+                    ctx.drawImage(originalCanvas, 50, 50);
+                    
+                    qrcodeDiv.appendChild(newCanvas);
+                }
+            }, 100);
+
+            document.getElementById('useQrBtn').style.display = 'block';
+        }
+
+        function useQRAsImage() {
+            const canvas = document.querySelector('#qrcode canvas');
+            
+            if (!canvas) {
+                alert('Please generate a QR code first!');
+                return;
+            }
+
+            // Ensure canvas is 400x355
+            const finalCanvas = document.createElement('canvas');
+            finalCanvas.width = 400;
+            finalCanvas.height = 355;
+            const finalCtx = finalCanvas.getContext('2d');
+            
+            finalCtx.fillStyle = '#ffffff';
+            finalCtx.fillRect(0, 0, 400, 355);
+            finalCtx.drawImage(canvas, 0, 0, 400, 355);
+            
+            const dataURL = finalCanvas.toDataURL('image/png');
+            
+            const img = new Image();
+            img.onload = function() {
+                convertImageToZPL(img);
+                
+                document.getElementById('previewImg').src = dataURL;
+                document.getElementById('previewImg').style.display = 'block';
+                document.getElementById('imagePreview').innerHTML = '<img id="previewImg" src="' + dataURL + '" style="max-width: 200px; border: 2px solid #d1d5db; border-radius: 8px;"><button onclick="clearImage()" style="margin-left: 10px; padding: 6px 12px; background: #ef4444; color: white; border: none; border-radius: 4px; cursor: pointer;">Remove</button>';
+                document.getElementById('imagePreview').style.display = 'block';
+                
+                const labelImage = document.getElementById('previewImageOnLabel');
+                labelImage.src = dataURL;
+                labelImage.style.display = 'block';
+                labelImage.style.left = (imageX * 1.5 + 15) + 'px';
+                labelImage.style.top = (imageY * 0.9 + 15 - 45) + 'px';
+                labelImage.style.maxWidth = (200 * imageScale) + 'px';
+                labelImage.style.maxHeight = (200 * imageScale) + 'px';
+                
+                document.getElementById('imageControls').style.display = 'block';
+                
+                previewImageData = dataURL;
+                
+                updateResizeHandle();
+                updatePreview();
+                checkImageCutoff();
+                
+                showStatus('QR code (400x355) added to label!');
+                
+                // Scroll to label preview
+                document.getElementById('labelPreview').scrollIntoView({ behavior: 'smooth', block: 'center' });
+            };
+            img.src = dataURL;
+        }
+
+        document.getElementById('qrText').addEventListener('keydown', function(e) {
+            if (e.ctrlKey && e.key === 'Enter') {
+                generateQR();
+            }
+        });
+
+        // ===== IMAGE FRAMER JAVASCRIPT =====
+        let cropperInstance = null;
+        const framerImage = document.getElementById('framerImage');
+        const framerFileInput = document.getElementById('framerFileInput');
+        const framerEditorSection = document.getElementById('framerEditorSection');
+        const framerPreview = document.getElementById('framerPreview');
+        const framerPreviewCtx = framerPreview.getContext('2d');
+
+        // Set preview canvas size
+        framerPreview.width = 400;
+        framerPreview.height = 355;
+
+        framerFileInput.addEventListener('change', function(e) {
+            const files = e.target.files;
+            if (files && files.length > 0) {
+                const file = files[0];
+                loadFramerImage(file);
+            }
+        });
+
+        function loadFramerImage(file) {
+            const reader = new FileReader();
+
+            reader.onload = function(event) {
+                framerImage.src = event.target.result;
+                framerEditorSection.style.display = 'block';
+
+                // Destroy previous cropper instance if it exists
+                if (cropperInstance) {
+                    cropperInstance.destroy();
+                }
+
+                // Initialize Cropper.js
+                cropperInstance = new Cropper(framerImage, {
+                    aspectRatio: 400/355,
+                    viewMode: 0,
+                    dragMode: 'move',
+                    autoCropArea: 1,
+                    restore: false,
+                    guides: true,
+                    center: true,
+                    highlight: false,
+                    cropBoxMovable: false,
+                    cropBoxResizable: false,
+                    toggleDragModeOnDblclick: false,
+                    minCropBoxWidth: 400,
+                    minCropBoxHeight: 355,
+                    minZoomRatio: 0.01,
+                    maxZoomRatio: 10,
+                    ready: function() {
+                        updateFramerPreview();
+                    },
+                    crop: function() {
+                        updateFramerPreview();
+                    }
+                });
+            };
+
+            reader.readAsDataURL(file);
+        }
+
+        function updateFramerPreview() {
+            if (!cropperInstance) return;
+
+            const canvas = cropperInstance.getCroppedCanvas({
+                width: 400,
+                height: 355,
+                imageSmoothingEnabled: true,
+                imageSmoothingQuality: 'high',
+                fillColor: '#ffffff'
+            });
+
+            framerPreviewCtx.clearRect(0, 0, 400, 355);
+            framerPreviewCtx.drawImage(canvas, 0, 0);
+        }
+
+        function rotateLeft() {
+            if (cropperInstance) {
+                cropperInstance.rotate(-45);
+            }
+        }
+
+        function rotateRight() {
+            if (cropperInstance) {
+                cropperInstance.rotate(45);
+            }
+        }
+
+        function zoomIn() {
+            if (cropperInstance) {
+                cropperInstance.zoom(0.1);
+            }
+        }
+
+        function zoomOut() {
+            if (cropperInstance) {
+                cropperInstance.zoom(-0.1);
+            }
+        }
+
+        function resetCrop() {
+            if (cropperInstance) {
+                cropperInstance.reset();
+            }
+        }
+
+        function saveFramedImage() {
+            if (!cropperInstance) return;
+
+            const canvas = cropperInstance.getCroppedCanvas({
+                width: 400,
+                height: 355,
+                imageSmoothingEnabled: true,
+                imageSmoothingQuality: 'high',
+                fillColor: '#ffffff'
+            });
+
+            canvas.toBlob(function(blob) {
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = 'framed-image-400x355.png';
+                link.click();
+                URL.revokeObjectURL(url);
+            });
+        }
+
+        function useFramedAsLabel() {
+            if (!cropperInstance) return;
+
+            const canvas = cropperInstance.getCroppedCanvas({
+                width: 400,
+                height: 355,
+                imageSmoothingEnabled: true,
+                imageSmoothingQuality: 'high',
+                fillColor: '#ffffff'
+            });
+
+            const dataURL = canvas.toDataURL('image/png');
+            
+            const img = new Image();
+            img.onload = function() {
+                convertImageToZPL(img);
+                
+                document.getElementById('previewImg').src = dataURL;
+                document.getElementById('previewImg').style.display = 'block';
+                document.getElementById('imagePreview').innerHTML = '<img id="previewImg" src="' + dataURL + '" style="max-width: 200px; border: 2px solid #d1d5db; border-radius: 8px;"><button onclick="clearImage()" style="margin-left: 10px; padding: 6px 12px; background: #ef4444; color: white; border: none; border-radius: 4px; cursor: pointer;">Remove</button>';
+                document.getElementById('imagePreview').style.display = 'block';
+                
+                const labelImage = document.getElementById('previewImageOnLabel');
+                labelImage.src = dataURL;
+                labelImage.style.display = 'block';
+                labelImage.style.left = (imageX * 1.5 + 15) + 'px';
+                labelImage.style.top = (imageY * 0.9 + 15 - 45) + 'px';
+                labelImage.style.maxWidth = (200 * imageScale) + 'px';
+                labelImage.style.maxHeight = (200 * imageScale) + 'px';
+                
+                document.getElementById('imageControls').style.display = 'block';
+                
+                previewImageData = dataURL;
+                
+                updateResizeHandle();
+                updatePreview();
+                checkImageCutoff();
+                
+                showStatus('Framed image (400x355) added to label!');
+                
+                // Scroll to label designer
+                document.getElementById('labelDesigner').scrollIntoView({ behavior: 'smooth', block: 'start' });
+            };
+            img.src = dataURL;
+        }
+
+        function startOverFramer() {
+            if (cropperInstance) {
+                cropperInstance.destroy();
+                cropperInstance = null;
+            }
+            framerEditorSection.style.display = 'none';
+            framerFileInput.value = '';
+            framerPreviewCtx.clearRect(0, 0, 400, 355);
+        }
+
+        function sendToThresholdEditor() {
+            if (!cropperInstance) return;
+
+            const canvas = cropperInstance.getCroppedCanvas({
+                width: 400,
+                height: 355,
+                imageSmoothingEnabled: true,
+                imageSmoothingQuality: 'high',
+                fillColor: '#ffffff'
+            });
+
+            canvas.toBlob(function(blob) {
+                // Load the framed image into threshold editor
+                loadImageFromBlob(blob);
+                
+                // Scroll to threshold editor
+                setTimeout(() => {
+                    document.getElementById('thresholdEditor').scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }, 300);
+                
+                showStatus('Framed image sent to Threshold Editor!');
+            });
+        }
+
+        // Clipboard paste functionality for framer
+        document.addEventListener('paste', function(e) {
+            const items = e.clipboardData.items;
+            
+            for (let i = 0; i < items.length; i++) {
+                if (items[i].type.indexOf('image') !== -1) {
+                    const blob = items[i].getAsFile();
+                    loadFramerImage(blob);
+                    e.preventDefault();
+                    
+                    // Scroll to framer section
+                    document.getElementById('imageFramer').scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    break;
+                }
+            }
+        });
+
+        // ===== THRESHOLD EDITOR JAVASCRIPT =====
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const canvasContainer = document.getElementById('canvasContainer');
+        
+        const originalCanvas = document.getElementById('originalCanvas');
+        const thresholdACanvas = document.getElementById('thresholdACanvas');
+        const thresholdBCanvas = document.getElementById('thresholdBCanvas');
+        const resultCanvas = document.getElementById('resultCanvas');
+        
+        const originalCtx = originalCanvas.getContext('2d');
+        const thresholdACtx = thresholdACanvas.getContext('2d');
+        const thresholdBCtx = thresholdBCanvas.getContext('2d');
+        const resultCtx = resultCanvas.getContext('2d');
+        
+        const thresholdASlider = document.getElementById('thresholdASlider');
+        const thresholdAValue = document.getElementById('thresholdAValue');
+        const thickenASlider = document.getElementById('thickenASlider');
+        const thickenAValue = document.getElementById('thickenAValue');
+        
+        const thresholdBSlider = document.getElementById('thresholdBSlider');
+        const thresholdBValue = document.getElementById('thresholdBValue');
+        const thickenBSlider = document.getElementById('thickenBSlider');
+        const thickenBValue = document.getElementById('thickenBValue');
+        
+        const brushBtn = document.getElementById('brushBtn');
+        const eraserBtn = document.getElementById('eraserBtn');
+        const brushSizeSlider = document.getElementById('brushSizeSlider');
+        const brushSizeValue = document.getElementById('brushSizeValue');
+        
+        const downloadBtn = document.getElementById('downloadBtn');
+        const resetMaskBtn = document.getElementById('resetMaskBtn');
+        const resetBtn = document.getElementById('resetBtn');
+        const useAsLabelBtn = document.getElementById('useAsLabelBtn');
+
+        let currentImage = null;
+        let brushMode = 'brush';
+        let brushSize = 30;
+        let isDrawing = false;
+
+        brushBtn.addEventListener('click', () => {
+            brushMode = 'brush';
+            brushBtn.classList.add('active');
+            eraserBtn.classList.remove('active');
+            resultCanvas.classList.remove('eraser');
+        });
+
+        eraserBtn.addEventListener('click', () => {
+            brushMode = 'eraser';
+            eraserBtn.classList.add('active');
+            brushBtn.classList.remove('active');
+            resultCanvas.classList.add('eraser');
+        });
+
+        brushSizeSlider.addEventListener('input', () => {
+            brushSize = parseInt(brushSizeSlider.value);
+            brushSizeValue.textContent = brushSize;
+        });
+
+        uploadArea.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files[0]) loadImage(e.target.files[0]);
+        });
+
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+        uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('dragover'));
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            const file = e.dataTransfer.files[0];
+            if (file && file.type.startsWith('image/')) loadImage(file);
+        });
+
+        function loadImage(file) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = new Image();
+                img.onload = () => {
+                    currentImage = img;
+                    setupCanvases(img);
+                    canvasContainer.style.display = 'block';
+                    uploadArea.style.display = 'none';
+                    updateThresholds();
+                };
+                img.src = e.target.result;
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function loadImageFromBlob(blob) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = new Image();
+                img.onload = () => {
+                    currentImage = img;
+                    setupCanvases(img);
+                    canvasContainer.style.display = 'block';
+                    uploadArea.style.display = 'none';
+                    updateThresholds();
+                };
+                img.src = e.target.result;
+            };
+            reader.readAsDataURL(blob);
+        }
+
+        function setupCanvases(img) {
+            // Always use 400x355 dimensions
+            const width = 400;
+            const height = 355;
+
+            [originalCanvas, thresholdACanvas, thresholdBCanvas, resultCanvas].forEach(canvas => {
+                canvas.width = width;
+                canvas.height = height;
+            });
+
+            // Calculate scaling to fit the image into 400x355 while maintaining aspect ratio
+            const scaleX = width / img.width;
+            const scaleY = height / img.height;
+            const scale = Math.min(scaleX, scaleY);
+            
+            const scaledWidth = img.width * scale;
+            const scaledHeight = img.height * scale;
+            
+            // Center the image
+            const offsetX = (width - scaledWidth) / 2;
+            const offsetY = (height - scaledHeight) / 2;
+            
+            // Fill with white background and draw centered image
+            originalCtx.fillStyle = '#ffffff';
+            originalCtx.fillRect(0, 0, width, height);
+            originalCtx.drawImage(img, offsetX, offsetY, scaledWidth, scaledHeight);
+        }
+
+        function applyThreshold(threshold, thicken) {
+            const imageData = originalCtx.getImageData(0, 0, originalCanvas.width, originalCanvas.height);
+            const data = imageData.data;
+            const width = imageData.width;
+            const height = imageData.height;
+
+            for (let i = 0; i < data.length; i += 4) {
+                const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+                const bw = gray >= threshold ? 255 : 0;
+                data[i] = bw;
+                data[i + 1] = bw;
+                data[i + 2] = bw;
+            }
+
+            if (thicken > 0) {
+                const originalData = new Uint8ClampedArray(data);
+                for (let y = 0; y < height; y++) {
+                    for (let x = 0; x < width; x++) {
+                        const idx = (y * width + x) * 4;
+                        if (originalData[idx] === 0) continue;
+                        
+                        let hasBlackNeighbor = false;
+                        for (let dy = -thicken; dy <= thicken; dy++) {
+                            for (let dx = -thicken; dx <= thicken; dx++) {
+                                const ny = y + dy;
+                                const nx = x + dx;
+                                if (ny >= 0 && ny < height && nx >= 0 && nx < width) {
+                                    const nIdx = (ny * width + nx) * 4;
+                                    if (originalData[nIdx] === 0) {
+                                        hasBlackNeighbor = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            if (hasBlackNeighbor) break;
+                        }
+                        
+                        if (hasBlackNeighbor) {
+                            data[idx] = 0;
+                            data[idx + 1] = 0;
+                            data[idx + 2] = 0;
+                        }
+                    }
+                }
+            }
+
+            return imageData;
+        }
+
+        function updateThresholds() {
+            const thresholdA = parseInt(thresholdASlider.value);
+            const thickenA = parseInt(thickenASlider.value);
+            const thresholdB = parseInt(thresholdBSlider.value);
+            const thickenB = parseInt(thickenBSlider.value);
+
+            thresholdAValue.textContent = thresholdA;
+            thickenAValue.textContent = thickenA;
+            thresholdBValue.textContent = thresholdB;
+            thickenBValue.textContent = thickenB;
+
+            const imageDataA = applyThreshold(thresholdA, thickenA);
+            const imageDataB = applyThreshold(thresholdB, thickenB);
+
+            thresholdACtx.putImageData(imageDataA, 0, 0);
+            thresholdBCtx.putImageData(imageDataB, 0, 0);
+            
+            if (!resultCanvas.dataset.hasContent) {
+                resultCtx.putImageData(imageDataA, 0, 0);
+                resultCanvas.dataset.hasContent = 'true';
+            }
+        }
+
+        thresholdASlider.addEventListener('input', updateThresholds);
+        thickenASlider.addEventListener('input', updateThresholds);
+        thresholdBSlider.addEventListener('input', updateThresholds);
+        thickenBSlider.addEventListener('input', updateThresholds);
+
+        resultCanvas.addEventListener('mousedown', startDrawing);
+        resultCanvas.addEventListener('mousemove', draw);
+        resultCanvas.addEventListener('mouseup', stopDrawing);
+        resultCanvas.addEventListener('mouseleave', stopDrawing);
+
+        resultCanvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            const touch = e.touches[0];
+            const rect = resultCanvas.getBoundingClientRect();
+            const x = touch.clientX - rect.left;
+            const y = touch.clientY - rect.top;
+            startDrawing({offsetX: x, offsetY: y});
+        });
+
+        resultCanvas.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            const touch = e.touches[0];
+            const rect = resultCanvas.getBoundingClientRect();
+            const x = touch.clientX - rect.left;
+            const y = touch.clientY - rect.top;
+            draw({offsetX: x, offsetY: y});
+        });
+
+        resultCanvas.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            stopDrawing();
+        });
+
+        function startDrawing(e) {
+            isDrawing = true;
+            draw(e);
+        }
+
+        function stopDrawing() {
+            isDrawing = false;
+        }
+
+        function draw(e) {
+            if (!isDrawing) return;
+
+            const rect = resultCanvas.getBoundingClientRect();
+            const scaleX = resultCanvas.width / rect.width;
+            const scaleY = resultCanvas.height / rect.height;
+            const x = e.offsetX * scaleX;
+            const y = e.offsetY * scaleY;
+
+            const sourceCanvas = brushMode === 'brush' ? thresholdBCanvas : thresholdACanvas;
+            const sourceData = sourceCanvas.getContext('2d').getImageData(0, 0, sourceCanvas.width, sourceCanvas.height);
+            const resultData = resultCtx.getImageData(0, 0, resultCanvas.width, resultCanvas.height);
+
+            const radius = brushSize / 2;
+            
+            for (let dy = -radius; dy <= radius; dy++) {
+                for (let dx = -radius; dx <= radius; dx++) {
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    if (distance > radius) continue;
+
+                    const px = Math.floor(x + dx);
+                    const py = Math.floor(y + dy);
+
+                    if (px < 0 || px >= resultCanvas.width || py < 0 || py >= resultCanvas.height) continue;
+
+                    const idx = (py * resultCanvas.width + px) * 4;
+                    
+                    resultData.data[idx] = sourceData.data[idx];
+                    resultData.data[idx + 1] = sourceData.data[idx + 1];
+                    resultData.data[idx + 2] = sourceData.data[idx + 2];
+                }
+            }
+
+            resultCtx.putImageData(resultData, 0, 0);
+        }
+
+        resetMaskBtn.addEventListener('click', () => {
+            const imageDataA = thresholdACtx.getImageData(0, 0, thresholdACanvas.width, thresholdACanvas.height);
+            resultCtx.putImageData(imageDataA, 0, 0);
+        });
+
+        downloadBtn.addEventListener('click', () => {
+            // Canvas is already 400x355
+            const link = document.createElement('a');
+            link.download = 'black-white-result-400x355.png';
+            link.href = resultCanvas.toDataURL();
+            link.click();
+        });
+
+        resetBtn.addEventListener('click', () => {
+            canvasContainer.style.display = 'none';
+            uploadArea.style.display = 'block';
+            fileInput.value = '';
+            thresholdASlider.value = 128;
+            thickenASlider.value = 0;
+            thresholdBSlider.value = 180;
+            thickenBSlider.value = 0;
+            brushSizeSlider.value = 30;
+            brushSize = 30;
+            brushSizeValue.textContent = 30;
+            currentImage = null;
+            resultCanvas.dataset.hasContent = '';
+            brushMode = 'brush';
+            brushBtn.classList.add('active');
+            eraserBtn.classList.remove('active');
+            resultCanvas.classList.remove('eraser');
+        });
+
+        useAsLabelBtn.addEventListener('click', () => {
+            // Canvas is already 400x355, just convert directly
+            const dataURL = resultCanvas.toDataURL('image/png');
+            
+            const img = new Image();
+            img.onload = function() {
+                convertImageToZPL(img);
+                
+                document.getElementById('previewImg').src = dataURL;
+                document.getElementById('previewImg').style.display = 'block';
+                document.getElementById('imagePreview').innerHTML = '<img id="previewImg" src="' + dataURL + '" style="max-width: 200px; border: 2px solid #d1d5db; border-radius: 8px;"><button onclick="clearImage()" style="margin-left: 10px; padding: 6px 12px; background: #ef4444; color: white; border: none; border-radius: 4px; cursor: pointer;">Remove</button>';
+                document.getElementById('imagePreview').style.display = 'block';
+                
+                const labelImage = document.getElementById('previewImageOnLabel');
+                labelImage.src = dataURL;
+                labelImage.style.display = 'block';
+                labelImage.style.left = (imageX * 1.5 + 15) + 'px';
+                labelImage.style.top = (imageY * 0.9 + 15 - 45) + 'px';
+                labelImage.style.maxWidth = (200 * imageScale) + 'px';
+                labelImage.style.maxHeight = (200 * imageScale) + 'px';
+                
+                document.getElementById('imageControls').style.display = 'block';
+                
+                previewImageData = dataURL;
+                
+                updateResizeHandle();
+                updatePreview();
+                checkImageCutoff();
+                
+                showStatus('Edited image (400x355) added to label!');
+                
+                // Scroll to label designer
+                document.getElementById('labelDesigner').scrollIntoView({ behavior: 'smooth', block: 'start' });
+            };
+            img.src = dataURL;
+        });
+    
+
+/* ════════════════════════════════════════════════════════════════════
+   PRINTER DIRECTORY + REMOTE PRINT QUEUE  (Firebase RTDB: persona-city)
+   Path:  labelStation/{syncKey}/{printers|defaultPrinterId|jobs}
+   Phone queues jobs -> work computer with "Agent" ON prints them on-LAN.
+   ════════════════════════════════════════════════════════════════════ */
+const RP_FB = {
+    apiKey: "AIzaSyB8uzYD_redmmqxqW_skoG0Z-W9faC-UpA",
+    authDomain: "persona-city.firebaseapp.com",
+    databaseURL: "https://persona-city-default-rtdb.firebaseio.com",
+    projectId: "persona-city",
+    storageBucket: "persona-city.firebasestorage.app",
+    messagingSenderId: "4714447458",
+    appId: "1:4714447458:web:47cc7f9028c44284bdc73b"
+};
+const SEED_PRINTERS = [
+    {
+        "name": "Me",
+        "ip": "10.247.58.43",
+        "port": "9100"
+    },
+    {
+        "name": "Aaronia",
+        "ip": "10.247.58.58",
+        "port": "9100"
+    },
+    {
+        "name": "Paula",
+        "ip": "10.247.58.37",
+        "port": "9100"
+    },
+    {
+        "name": "Chris",
+        "ip": "10.247.59.19",
+        "port": "9100"
+    },
+    {
+        "name": "Emily",
+        "ip": "10.247.59.187",
+        "port": "9100"
+    },
+    {
+        "name": "Mary",
+        "ip": "10.247.59.130",
+        "port": "9100"
+    },
+    {
+        "name": "Liz Roebuck",
+        "ip": "10.247.59.108",
+        "port": "9100"
+    },
+    {
+        "name": "Dahjia",
+        "ip": "10.247.59.243",
+        "port": "9100"
+    },
+    {
+        "name": "Skylah",
+        "ip": "10.247.58.244",
+        "port": "9100"
+    },
+    {
+        "name": "Marina",
+        "ip": "10.247.58.38",
+        "port": "9100"
+    },
+    {
+        "name": "David",
+        "ip": "10.247.58.95",
+        "port": "9100"
+    },
+    {
+        "name": "Jillian",
+        "ip": "10.247.59.40",
+        "port": "9100"
+    },
+    {
+        "name": "Tiara",
+        "ip": "10.247.58.157",
+        "port": "9100"
+    },
+    {
+        "name": "Stephen",
+        "ip": "10.247.58.223",
+        "port": "9100"
+    },
+    {
+        "name": "Kylie",
+        "ip": "10.247.59.65",
+        "port": "9100"
+    },
+    {
+        "name": "Haley",
+        "ip": "10.247.59.85",
+        "port": "9100"
+    },
+    {
+        "name": "Paulo",
+        "ip": "10.247.58.94",
+        "port": "9100"
+    },
+    {
+        "name": "Alison",
+        "ip": "10.247.58.232",
+        "port": "9100"
+    },
+    {
+        "name": "Karla",
+        "ip": "10.247.59.3",
+        "port": "9100"
+    },
+    {
+        "name": "Tito",
+        "ip": "10.247.58.64",
+        "port": "9100"
+    },
+    {
+        "name": "Aaron",
+        "ip": "10.247.58.51",
+        "port": "9100"
+    },
+    {
+        "name": "Aiden",
+        "ip": "10.247.59.104",
+        "port": "9100"
+    },
+    {
+        "name": "Josh",
+        "ip": "10.247.59.199",
+        "port": "9100"
+    },
+    {
+        "name": "Zak",
+        "ip": "10.247.59.10",
+        "port": "9100"
+    },
+    {
+        "name": "Yamin",
+        "ip": "10.247.58.245",
+        "port": "9100"
+    },
+    {
+        "name": "Ajahnae",
+        "ip": "10.247.58.163",
+        "port": "9100"
+    },
+    {
+        "name": "Ryan",
+        "ip": "10.247.59.7",
+        "port": "9100"
+    },
+    {
+        "name": "Ted",
+        "ip": "10.247.59.127",
+        "port": "9100"
+    },
+    {
+        "name": "Dani",
+        "ip": "10.247.58.59",
+        "port": "9100"
+    },
+    {
+        "name": "Neida",
+        "ip": "10.247.58.63",
+        "port": "9100"
+    },
+    {
+        "name": "Jason",
+        "ip": "10.247.58.247",
+        "port": "9100"
+    },
+    {
+        "name": "Island Corner",
+        "ip": "10.247.59.47",
+        "port": "9100"
+    },
+    {
+        "name": "Island Middle",
+        "ip": "10.247.59.241",
+        "port": "9100"
+    },
+    {
+        "name": "Island Edge (Dual Screen)",
+        "ip": "10.247.58.81",
+        "port": "9100"
+    },
+    {
+        "name": "Aysha (Scanning Left Side)",
+        "ip": "10.247.58.241",
+        "port": "9100"
+    },
+    {
+        "name": "Scanning Right Side",
+        "ip": "10.247.59.242",
+        "port": "9100"
+    }
+];
+
+let rpDB=null, rpReady=false;
+let rpPrinters=[], rpDefaultId='', rpJobs=[];
+let rpPrintersRef=null, rpDefaultRef=null, rpJobsRef=null;
+let rpAgentOn=false, rpProcessing=false, rpSaveTimer=null;
+const RP_LS = { key:'rp.syncKey', agent:'rp.agent', device:'rp.device' };
+
+function escHtml(s){ return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function escAttr(s){ return escHtml(s); }
+function sanitizeKey(s){ return (s||'').toLowerCase().replace(/[^a-z0-9_-]/g,'_'); }
+function getSyncKey(){ return (localStorage.getItem(RP_LS.key)||'').trim(); }
+function rpDeviceName(){ return localStorage.getItem(RP_LS.device)||'device'; }
+function rpPaths(k){ return { printers:`labelStation/${k}/printers`, defaultId:`labelStation/${k}/defaultPrinterId`, jobs:`labelStation/${k}/jobs` }; }
+
+function switchTopTab(name){
+    document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
+    document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+    const panel=document.getElementById('tab-'+name); if(panel) panel.classList.add('active');
+    const btn=document.querySelector('.tab-btn[data-tab="'+name+'"]'); if(btn) btn.classList.add('active');
+    window.scrollTo({top:0,behavior:'smooth'});
+}
+
+function rpSetStatus(msg, ok){
+    ['connStatusP','connStatusR'].forEach(id=>{const e=document.getElementById(id); if(e) e.textContent=msg;});
+    ['connDotP','connDotR'].forEach(id=>{const e=document.getElementById(id); if(e){ e.classList.toggle('on', ok===true); e.classList.toggle('off', ok===false);} });
+}
+function rpLog(msg){ const el=document.getElementById('agentLog'); if(!el) return; const t=new Date().toLocaleTimeString(); el.textContent=`[${t}] ${msg}\n`+el.textContent; }
+
+function rpInit(){
+    if (typeof firebase === 'undefined'){ rpSetStatus('Firebase SDK did not load — remote features offline.', false); return; }
+    try {
+        if (!(firebase.apps && firebase.apps.length)) firebase.initializeApp(RP_FB);
+        rpDB = firebase.database(); rpReady = true;
+    } catch(e){ console.error('[RP] init', e); rpSetStatus('Firebase init failed: '+e.message, false); return; }
+    if (!localStorage.getItem(RP_LS.device)) localStorage.setItem(RP_LS.device, 'dev-'+Math.random().toString(36).slice(2,8));
+    const k = getSyncKey();
+    const a=document.getElementById('syncKeyInput'), b=document.getElementById('syncKeyInputR');
+    if(a) a.value=k; if(b) b.value=k;
+    if (k){ rpSubscribe(k); } else { rpSetStatus('Enter a sync key to connect.', null); }
+}
+
+function saveSyncKey(){ _saveKey(document.getElementById('syncKeyInput').value); }
+function saveSyncKeyR(){ _saveKey(document.getElementById('syncKeyInputR').value); }
+function _saveKey(raw){
+    const k=sanitizeKey(raw);
+    if(!k){ alert('Enter a sync key (letters, numbers, - or _).'); return; }
+    localStorage.setItem(RP_LS.key,k);
+    const a=document.getElementById('syncKeyInput'), b=document.getElementById('syncKeyInputR');
+    if(a) a.value=k; if(b) b.value=k;
+    rpSubscribe(k);
+}
+
+function rpDetach(){ if(rpPrintersRef)rpPrintersRef.off(); if(rpDefaultRef)rpDefaultRef.off(); if(rpJobsRef)rpJobsRef.off(); rpPrintersRef=rpDefaultRef=rpJobsRef=null; }
+
+function rpSubscribe(k){
+    if(!rpReady) return;
+    rpDetach();
+    const p=rpPaths(k);
+    rpSetStatus('Connected · '+k, true);
+    rpPrintersRef=rpDB.ref(p.printers);
+    rpDefaultRef=rpDB.ref(p.defaultId);
+    rpJobsRef=rpDB.ref(p.jobs);
+
+    rpPrintersRef.on('value', snap=>{
+        const v=snap.val();
+        if (v==null){ // first use of this key — seed from the built-in list
+            rpPrinters=SEED_PRINTERS.map((x,i)=>({id:'p'+Date.now()+'_'+i, name:x.name, ip:x.ip, port:x.port}));
+            rpPushPrinters();
+        } else {
+            rpPrinters = Array.isArray(v) ? v.filter(Boolean) : Object.values(v);
+        }
+        renderPrinterRows(); refreshPrinterSelects();
+    }, err=>console.warn('[RP] printers', err));
+
+    rpDefaultRef.on('value', snap=>{ rpDefaultId=snap.val()||''; renderPrinterRows(); refreshPrinterSelects(); });
+
+    rpJobsRef.on('value', snap=>{
+        const v=snap.val()||{};
+        rpJobs=Object.entries(v).map(([id,j])=>Object.assign({},j,{id})).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+        renderJobList();
+        if (rpAgentOn) rpAgentProcess();
+    }, err=>console.warn('[RP] jobs', err));
+
+    if (localStorage.getItem(RP_LS.agent)==='1'){
+        const cb=document.getElementById('agentCheckbox');
+        if(cb){ cb.checked=true; rpAgentOn=true; const at=document.getElementById('agentToggle'); if(at) at.classList.add('on'); rpLog('✅ Agent restored ON.'); }
+    }
+}
+
+/* ---- Printer directory ---- */
+function rpPushPrinters(){ const k=getSyncKey(); if(!rpReady||!k) return; rpDB.ref(rpPaths(k).printers).set(rpPrinters).catch(e=>console.warn(e)); }
+function rpSetDefault(id){ rpDefaultId=id; const k=getSyncKey(); if(rpReady&&k) rpDB.ref(rpPaths(k).defaultId).set(id); renderPrinterRows(); refreshPrinterSelects(); }
+function rpScheduleSave(){
+    const st=document.getElementById('printerSaveStatus'); if(st) st.textContent='Saving…';
+    if(rpSaveTimer) clearTimeout(rpSaveTimer);
+    rpSaveTimer=setTimeout(()=>{ rpPushPrinters(); if(st){ st.textContent='✓ Saved'; setTimeout(()=>st.textContent='',1500);} },600);
+}
+function rpEdit(i,f,v){ if(rpPrinters[i]){ rpPrinters[i][f]=v; rpScheduleSave(); if(f!=='name') refreshPrinterSelects(); } }
+function rpDeleteRow(i){ rpPrinters.splice(i,1); renderPrinterRows(); refreshPrinterSelects(); rpScheduleSave(); }
+function addPrinterRow(){ rpPrinters.push({id:'p'+Date.now()+'_'+Math.random().toString(36).slice(2,5),name:'New Printer',ip:'10.247.',port:'9100'}); renderPrinterRows(); rpScheduleSave(); }
+function seedPrintersFromDefaults(){ if(!confirm('Replace the current list with the built-in list?')) return; rpPrinters=SEED_PRINTERS.map((x,i)=>({id:'p'+Date.now()+'_'+i,name:x.name,ip:x.ip,port:x.port})); renderPrinterRows(); refreshPrinterSelects(); rpPushPrinters(); }
+
+function renderPrinterRows(){
+    const tb=document.getElementById('printerRows'); if(!tb) return;
+    if(!rpPrinters.length){ tb.innerHTML='<tr><td colspan="5" style="color:#9ca3af;">No printers yet. Add one or load the built-in list.</td></tr>'; return; }
+    tb.innerHTML=rpPrinters.map((p,i)=>`<tr>
+        <td style="text-align:center;"><input type="radio" name="defPrinter" ${p.id===rpDefaultId?'checked':''} onchange="rpSetDefault('${p.id}')"></td>
+        <td><input value="${escAttr(p.name)}" oninput="rpEdit(${i},'name',this.value)"></td>
+        <td><input class="ip-input" value="${escAttr(p.ip)}" oninput="rpEdit(${i},'ip',this.value)"></td>
+        <td><input value="${escAttr(p.port||'9100')}" oninput="rpEdit(${i},'port',this.value)"></td>
+        <td><button class="row-btn row-del" onclick="rpDeleteRow(${i})">✕</button></td>
+    </tr>`).join('');
+}
+function refreshPrinterSelects(){
+    const opts=rpPrinters.map(p=>`<option value="${p.id}">${escHtml(p.name)} — ${escHtml(p.ip)}</option>`).join('');
+    const ds=document.getElementById('printerSelect');
+    if(ds){ const cur=ds.value; ds.innerHTML='<option value="">— manual entry below —</option>'+opts; if([...ds.options].some(o=>o.value===cur)) ds.value=cur; }
+    const qs=document.getElementById('qjPrinter');
+    if(qs){ const cur=qs.value; qs.innerHTML=opts||'<option value="">(no printers yet)</option>'; qs.value=([...qs.options].some(o=>o.value===cur)?cur:'')||rpDefaultId||(rpPrinters[0]&&rpPrinters[0].id)||''; }
+}
+function applyPrinterFromDirectory(){
+    const id=document.getElementById('printerSelect').value;
+    const p=rpPrinters.find(x=>x.id===id); if(!p) return;
+    document.getElementById('printerIP').value=p.ip;
+    document.getElementById('port').value=p.port||'9100';
+    try{ if(typeof validateIP==='function') validateIP(); }catch(e){}
+}
+
+/* ---- Printing primitives ---- */
+function normalizeIP(ip){ return (ip||'').split('.').map(o=>{const n=parseInt(o,10);return isNaN(n)?o:String(n);}).join('.'); }
+function rawSendZPL(zpl, ip, port){
+    ip=normalizeIP(ip); port=port||'9100';
+    return fetch(`http://${ip}:${port}`,{ method:'POST', body:zpl, headers:{'Content-Type':'text/plain','X-Request-ID':Date.now()+'-'+Math.random().toString(36).slice(2,9)}, mode:'no-cors', cache:'no-cache', keepalive:true });
+}
+
+/* ---- Job creation ---- */
+function createJob(job){
+    const k=getSyncKey();
+    if(!rpReady||!k){ alert('Connect a sync key first (Printers or Remote Print tab).'); return; }
+    const ref=rpDB.ref(rpPaths(k).jobs).push();
+    const payload=Object.assign({ status:'queued', createdAt:firebase.database.ServerValue.TIMESTAMP, createdBy:rpDeviceName() }, job);
+    ref.set(payload).then(()=>{ try{ showStatus('📡 Job queued for '+(job.printerName||'printer')); }catch(e){} })
+        .catch(e=>alert('Queue failed: '+e.message));
+}
+function queueCurrentDesignAsJob(){
+    const id=document.getElementById('printerSelect').value;
+    const p=rpPrinters.find(x=>x.id===id);
+    const ip=p?p.ip:document.getElementById('printerIP').value;
+    const port=p?(p.port||'9100'):document.getElementById('port').value;
+    const name=p?p.name:ip;
+    let zpl; try{ zpl=generateZPL(); }catch(e){ alert('Could not generate label: '+e.message); return; }
+    const copies=document.getElementById('copies').value||'1';
+    const label=(document.getElementById('labelText').value||'').split('\n').filter(Boolean)[0]||'(label)';
+    createJob({ printerName:name, printerIP:ip, port:port, zpl:zpl, copies:String(copies), label:label });
+}
+function buildSimpleZPL(text, barcode, copies){
+    const lines=(text||'').split('\n').filter(l=>l.trim()!=='');
+    let y=50, cmds='';
+    lines.forEach(l=>{ cmds+=`^FO50,${y}^A0N,30,30^FD${l.trim()}^FS\n`; y+=35; });
+    let bc='', bd=(barcode||'').replace(/[\s-]/g,'').replace(/\D/g,'');
+    if(bd){ if(bd.length>12) bd=bd.slice(-12); const est=bd.length*11+35; const bw=Math.max(1.0,Math.min(2.5,380/est)); bc=`^FO20,${y+10}^BY${bw.toFixed(3)}^BCN,68,N,N,N^FD${bd}^FS`; }
+    const h=Math.max(200, y+(bd?100:40));
+    return `^XA\n^PW400\n^LL${h}\n${cmds}\n${bc}\n^PQ${copies||1}\n^XZ`;
+}
+function queueQuickJob(){
+    const id=document.getElementById('qjPrinter').value;
+    const p=rpPrinters.find(x=>x.id===id);
+    if(!p){ alert('Pick a printer (add some in the Printers tab).'); return; }
+    const text=document.getElementById('qjText').value, barcode=document.getElementById('qjBarcode').value;
+    const copies=document.getElementById('qjCopies').value||'1';
+    if(!text.trim() && !barcode.trim()){ alert('Enter label text or a barcode.'); return; }
+    const zpl=buildSimpleZPL(text,barcode,copies);
+    createJob({ printerName:p.name, printerIP:p.ip, port:p.port||'9100', zpl:zpl, copies:String(copies), label:(text.split('\n').filter(Boolean)[0]||barcode||'(label)') });
+}
+
+/* ---- Agent (the device that prints) ---- */
+function toggleAgent(){
+    rpAgentOn=document.getElementById('agentCheckbox').checked;
+    localStorage.setItem(RP_LS.agent, rpAgentOn?'1':'0');
+    const at=document.getElementById('agentToggle'); if(at) at.classList.toggle('on', rpAgentOn);
+    rpLog(rpAgentOn?'✅ Agent ON — watching for queued jobs.':'⏸ Agent OFF.');
+    if(rpAgentOn) rpAgentProcess();
+}
+async function rpAgentProcess(){
+    if(!rpAgentOn||rpProcessing||!rpReady) return;
+    const k=getSyncKey(); if(!k) return;
+    const queued=rpJobs.filter(j=>j.status==='queued');
+    if(!queued.length) return;
+    rpProcessing=true;
+    for(const job of queued){
+        const sref=rpDB.ref(rpPaths(k).jobs+'/'+job.id+'/status');
+        let claimed=false;
+        try{ const res=await sref.transaction(cur=> cur==='queued' ? 'printing' : undefined); claimed=res.committed && res.snapshot.val()==='printing'; }
+        catch(e){ rpLog('⚠️ claim error: '+e.message); continue; }
+        if(!claimed) continue; // another agent grabbed it
+        const base=rpDB.ref(rpPaths(k).jobs+'/'+job.id);
+        base.update({ claimedBy:rpDeviceName() });
+        rpLog(`🖨️ Printing "${job.label||'job'}" → ${job.printerName} (${job.printerIP})`);
+        try{
+            await rawSendZPL(job.zpl, job.printerIP, job.port);
+            await new Promise(r=>setTimeout(r,700));
+            await base.update({ status:'sent', finishedAt:firebase.database.ServerValue.TIMESTAMP });
+            rpLog(`   ✓ dispatched to ${job.printerIP}`);
+        }catch(e){
+            await base.update({ status:'error', error:String((e&&e.message)||e) });
+            rpLog(`   ✗ ${(e&&e.message)||e}`);
+        }
+        await new Promise(r=>setTimeout(r,300));
+    }
+    rpProcessing=false;
+}
+
+/* ---- Job list UI ---- */
+function jobBadge(s){ const m={queued:'b-queued',printing:'b-printing',sent:'b-sent',error:'b-error'}; return `<span class="badge2 ${m[s]||'b-queued'}">${s||'queued'}</span>`; }
+function renderJobList(){
+    const el=document.getElementById('jobList'); if(!el) return;
+    if(!rpJobs.length){ el.innerHTML='<p style="color:#9ca3af; font-size:14px;">No jobs yet.</p>'; return; }
+    el.innerHTML=rpJobs.map(j=>`<div class="job-card">
+        <div class="job-meta">
+            <div class="j-printer">${escHtml(j.printerName||j.printerIP||'?')} ${jobBadge(j.status)}</div>
+            <div>${escHtml(j.label||'(label)')} • ${escHtml(String(j.copies||1))} ${(String(j.copies)==='1'?'copy':'copies')} • from ${escHtml(j.createdBy||'?')}</div>
+            ${j.error?`<div style="color:#b91c1c;">${escHtml(j.error)}</div>`:''}
+        </div>
+        <div style="display:flex; gap:6px;">
+            ${j.status==='error'?`<button class="row-btn" style="background:#dbeafe;color:#1e40af;" onclick="rpRetry('${j.id}')">Retry</button>`:''}
+            <button class="row-btn row-del" onclick="rpDeleteJob('${j.id}')">✕</button>
+        </div>
+    </div>`).join('');
+}
+function rpRetry(id){ const k=getSyncKey(); if(rpReady&&k) rpDB.ref(rpPaths(k).jobs+'/'+id).update({status:'queued',error:null}); }
+function rpDeleteJob(id){ const k=getSyncKey(); if(rpReady&&k) rpDB.ref(rpPaths(k).jobs+'/'+id).remove(); }
+function clearFinishedJobs(){ const k=getSyncKey(); if(!rpReady||!k) return; rpJobs.filter(j=>j.status==='sent'||j.status==='error').forEach(j=>rpDB.ref(rpPaths(k).jobs+'/'+j.id).remove()); }
+
+try { rpInit(); } catch(e){ console.error('[RP] startup', e); }
+/* ════════════════ end remote print module ════════════════ */
+
+    <\/script>
+</body>
+</html>
+</script>
+
 <!-- Firebase v9 compat (matches Persona City) -->
 <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-database-compat.js"></script>
@@ -2153,10 +6033,23 @@ function switchTab(t) {
     $('view-sops').style.display = (t === 'sops') ? '' : 'none';
     $('view-notebooks').style.display = (t === 'notebooks') ? '' : 'none';
     $('view-trees').style.display = (t === 'trees') ? '' : 'none';
+    $('view-labels').classList.toggle('show', t === 'labels');
+    if (t === 'labels') loadLabelFrame();
     $('view-editor').style.display = 'none';
     $('topbar-list').style.display = '';
     $('topbar-editor').style.display = 'none';
     $('fab-new').style.display = (t === 'notebooks' || t === 'trees') ? '' : 'none';
+}
+
+// Lazily load the label/printer tools into the isolated iframe (mirrors openBuilder).
+let labelFrameLoaded = false;
+function loadLabelFrame() {
+    if (labelFrameLoaded) return;
+    const frame = $('label-frame');
+    const el = $('label-doc');
+    if (!frame || !el) return;
+    frame.srcdoc = el.textContent.replace(/<\\\/script>/g, '<' + '/script>');
+    labelFrameLoaded = true;
 }
 
 // ─── Boot: load both data sets ───────────────────────────────────────
@@ -2169,6 +6062,7 @@ async function boot() {
     await loadTrees();
     setStatus('✓ Ready', 'ok');
     setTimeout(() => setStatus('', ''), 2500);
+    attachNotebooksListener();
 }
 
 $('btn-refresh').addEventListener('click', boot);
@@ -2222,32 +6116,122 @@ async function loadNotebooks() {
     try {
         const ref = db.ref(`rooms/${state.room}/playerDeskDataByName/${state.sanitizedName}`);
         const snap = await ref.once('value');
-        const allDesks = snap.val() || {};
-        const all = [];
-        for (const [sanitizedDeskName, entry] of Object.entries(allDesks)) {
-            const deskName = (entry && entry.deskName) || sanitizedDeskName;
-            const nbs = (entry && entry.data && entry.data.notebooks) || [];
-            nbs.forEach((nb, idx) => {
-                if (!nb) return;
-                all.push({
-                    sanitizedDeskName,
-                    deskName,
-                    idx,
-                    title: nb.title || `Notebook ${idx + 1}`,
-                    pages: Array.isArray(nb.pages) ? nb.pages : [String(nb.pages || '')],
-                    lastModified: (entry && entry.updatedAt) || 0,
-                });
-            });
-        }
-        // Sort by lastModified descending
-        all.sort((a, b) => (b.lastModified || 0) - (a.lastModified || 0));
-        state.notebooks = all;
-        renderNotebooksList();
+        rebuildNotebooksFromDesks(snap.val() || {});
     } catch (e) {
         console.error('[NB] load failed:', e);
         state.notebooks = [];
         renderNotebooksList(true, e.message);
     }
+}
+
+// Build state.notebooks from the raw desk snapshot. Shared by the one-shot load
+// and the live listener so both stay consistent.
+function rebuildNotebooksFromDesks(allDesks) {
+    const all = [];
+    for (const [sanitizedDeskName, entry] of Object.entries(allDesks)) {
+        const deskName = (entry && entry.deskName) || sanitizedDeskName;
+        const nbs = (entry && entry.data && entry.data.notebooks) || [];
+        nbs.forEach((nb, idx) => {
+            if (!nb) return;
+            all.push({
+                sanitizedDeskName,
+                deskName,
+                idx,
+                id: nb.id,
+                title: nb.title || `Notebook ${idx + 1}`,
+                pages: Array.isArray(nb.pages) ? nb.pages : [String(nb.pages || '')],
+                // Prefer the notebook's OWN timestamp; desk updatedAt is shared
+                // across every notebook in the desk and can't order them.
+                lastModified: nb.lastModified || (entry && entry.updatedAt) || 0,
+            });
+        });
+    }
+    all.sort((a, b) => (b.lastModified || 0) - (a.lastModified || 0));
+    state.notebooks = all;
+    renderNotebooksList();
+    reconcileOpenNotebook(all);
+}
+
+// Live subscription so Roblox edits show up here without a manual refresh.
+let nbListener = null;
+function attachNotebooksListener() {
+    if (nbListener) return;
+    const ref = db.ref(`rooms/${state.room}/playerDeskDataByName/${state.sanitizedName}`);
+    nbListener = ref.on('value', (snap) => {
+        try { rebuildNotebooksFromDesks(snap.val() || {}); }
+        catch (e) { console.warn('[NB] live update failed:', e); }
+    }, (err) => console.warn('[NB] listener error:', err));
+}
+
+// Stable text snapshot of a notebook, used to detect external (Roblox) changes
+// vs. our own echoed writes.
+function nbSnapshot(nb) {
+    return JSON.stringify({ title: nb.title || '', pages: Array.isArray(nb.pages) ? nb.pages : [] });
+}
+
+// When a live update arrives, decide what to do with the notebook open in the editor.
+function reconcileOpenNotebook(all) {
+    if (!state.editing || state.editing.kind !== 'nb') return;
+    const openId = state.editing.payload.id;
+    if (openId == null) return; // legacy notebook without an id — can't track live
+    const freshIdx = all.findIndex(n => n.id === openId);
+    if (freshIdx < 0) {
+        updateAutoStatus('⚠️ This notebook was removed in Roblox');
+        return;
+    }
+    state.editing.nbIdx = freshIdx; // keep list pointer valid after re-sort
+    const fresh = all[freshIdx];
+    const freshSnap = nbSnapshot(fresh);
+    if (freshSnap === state.editing.baseline) return; // unchanged, or our own echo
+    if (!state.dirty) {
+        applyRemoteToEditor(fresh); // no local edits — safe to refresh in place
+    } else {
+        showRemoteUpdateBanner(fresh, freshSnap); // conflict — let the user choose
+    }
+}
+
+function applyRemoteToEditor(fresh) {
+    const ed = state.editing;
+    ed.payload.title = fresh.title;
+    ed.payload.pages = Array.isArray(fresh.pages) ? fresh.pages.slice() : [''];
+    ed.payload.lastModified = fresh.lastModified;
+    ed.payload.idx = fresh.idx;
+    if (ed.currentPage >= ed.payload.pages.length) ed.currentPage = ed.payload.pages.length - 1;
+    if (ed.currentPage < 0) ed.currentPage = 0;
+    $('editor-title').value = ed.payload.title;
+    $('editor-text').value = ed.payload.pages[ed.currentPage] || '';
+    $('editor-meta-modified').textContent = ed.payload.lastModified ? `modified ${fmtTime(ed.payload.lastModified)}` : '';
+    renderPagesNav();
+    ed.baseline = nbSnapshot(ed.payload);
+    state.dirty = false;
+    hideRemoteUpdateBanner();
+    updateAutoStatus('↻ Updated from Roblox');
+}
+
+function showRemoteUpdateBanner(fresh, freshSnap) {
+    const ed = state.editing;
+    if (ed.pendingRemoteSnap === freshSnap) return; // already prompting for this version
+    ed.pendingRemote = fresh;
+    ed.pendingRemoteSnap = freshSnap;
+    let banner = $('remote-update-banner');
+    if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'remote-update-banner';
+        banner.style.cssText = 'display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#3a2f00;border:1px solid #8b6914;color:#ffd86b;padding:8px 12px;border-radius:8px;margin:8px;font-size:13px;';
+        $('view-editor').insertBefore(banner, $('view-editor').firstChild);
+    }
+    banner.innerHTML = '<span>↻ This notebook changed in Roblox while you were editing.</span>'
+        + '<button id="rub-load" style="background:#8b6914;color:#fff;border:none;border-radius:6px;padding:4px 10px;cursor:pointer;">Load their version</button>'
+        + '<button id="rub-dismiss" style="background:transparent;color:#ffd86b;border:1px solid #8b6914;border-radius:6px;padding:4px 10px;cursor:pointer;">Keep mine</button>';
+    banner.style.display = 'flex';
+    $('rub-load').onclick = () => { if (state.editing && state.editing.pendingRemote) applyRemoteToEditor(state.editing.pendingRemote); };
+    $('rub-dismiss').onclick = hideRemoteUpdateBanner;
+}
+
+function hideRemoteUpdateBanner() {
+    const b = $('remote-update-banner');
+    if (b) b.style.display = 'none';
+    if (state.editing) { state.editing.pendingRemote = null; state.editing.pendingRemoteSnap = null; }
 }
 
 function renderNotebooksList(error, errMsg) {
@@ -2290,8 +6274,10 @@ $('fab-new').addEventListener('click', async () => {
     if (!deskHint) return;
     
     const newNb = {
+        id: Date.now(),
         title: title.trim(),
         pages: [''],
+        pageSettings: [{ type: 'text', bg: 'plain' }],
         createdAt: Date.now(),
         lastModified: Date.now(),
     };
@@ -2307,12 +6293,16 @@ $('fab-new').addEventListener('click', async () => {
         if (!existing.data) existing.data = {};
         if (!Array.isArray(existing.data.notebooks)) existing.data.notebooks = [];
         existing.data.notebooks.push(newNb);
+        existing.data.lastModified = newNb.lastModified;
         existing.updatedAt = firebase.database.ServerValue.TIMESTAMP;
         await ref.set(existing);
         setStatus('✓ Created', 'ok');
         await loadNotebooks();
-        // Auto-open the new one (index 0 after sort by lastModified)
-        openNotebookEditor(0);
+        // Open the notebook we just created by its stable id. Array index is
+        // unreliable: a desk can hold several notebooks and push() appends to
+        // the end, so index 0 is usually a pre-existing one.
+        const newIdx = state.notebooks.findIndex(n => n.id === newNb.id);
+        openNotebookEditor(newIdx >= 0 ? newIdx : 0);
     } catch (e) {
         setStatus('⚠️ Create failed: ' + e.message, 'err');
     }
@@ -2353,7 +6343,9 @@ function openNotebookEditor(idx) {
         payload: nb,
         currentPage: 0,
     };
+    state.editing.baseline = nbSnapshot(nb);
     state.dirty = false;
+    hideRemoteUpdateBanner();
     $('topbar-list').style.display = 'none';
     $('topbar-editor').style.display = '';
     $('view-sops').style.display = 'none';
@@ -2408,6 +6400,7 @@ $('btn-back').addEventListener('click', () => {
     if (state.dirty) {
         if (!confirm('You have unsaved changes. Leave anyway?')) return;
     }
+    hideRemoteUpdateBanner();
     state.editing = null;
     state.dirty = false;
     $('topbar-list').style.display = '';
@@ -2494,13 +6487,38 @@ async function saveNotebook() {
     const entry = snap.val() || { deskName: nb.deskName, ownerName: state.playerName, data: { notebooks: [] } };
     if (!entry.data) entry.data = {};
     if (!Array.isArray(entry.data.notebooks)) entry.data.notebooks = [];
-    // Update or insert at the original index
-    entry.data.notebooks[nb.idx] = {
+    // Locate this notebook in the desk array by its stable id; only fall back
+    // to the captured array index when there's no id to match on. This keeps an
+    // edit from ever landing on the wrong notebook after the array shifts.
+    let writeIdx = nb.idx;
+    if (nb.id != null) {
+        const found = entry.data.notebooks.findIndex(x => x && x.id === nb.id);
+        if (found >= 0) writeIdx = found;
+    }
+    // Update or insert at the located index. MERGE — never replace — so the
+    // Roblox app's own fields (id, pageSettings, bookmarks, etc.) survive an edit
+    // made here. We only own title / pages / timestamps.
+    const prevNb = entry.data.notebooks[writeIdx] || {};
+    entry.data.notebooks[writeIdx] = {
+        ...prevNb,
+        id: prevNb.id || nb.id || Date.now(),
         title: nb.title,
         pages: nb.pages,
         lastModified: nb.lastModified,
-        createdAt: entry.data.notebooks[nb.idx]?.createdAt || Date.now(),
+        createdAt: prevNb.createdAt || nb.createdAt || Date.now(),
     };
+    // Keep the in-memory record aligned (new notebooks get their id stamped here).
+    nb.id = entry.data.notebooks[writeIdx].id;
+    nb.idx = writeIdx;
+    // Pre-stamp the baseline to exactly what we're about to write, so the live
+    // listener treats the resulting echo as "no change" rather than a conflict.
+    state.editing.baseline = nbSnapshot(nb);
+    hideRemoteUpdateBanner();
+    // The main app's room-join sync prefers cloud only when the desk blob looks
+    // newer. Bump BOTH the data-level lastModified (older builds compare this)
+    // and updatedAt (newer builds compare this), and keep ownerName for lookup.
+    entry.ownerName = entry.ownerName || state.playerName;
+    entry.data.lastModified = nb.lastModified;
     entry.updatedAt = firebase.database.ServerValue.TIMESTAMP;
     await ref.set(entry);
     state.notebooks[state.editing.nbIdx] = nb;
@@ -2529,7 +6547,13 @@ $('btn-delete').addEventListener('click', async () => {
             const snap = await ref.once('value');
             const entry = snap.val();
             if (entry && entry.data && Array.isArray(entry.data.notebooks)) {
-                entry.data.notebooks.splice(nb.idx, 1);
+                let delIdx = nb.idx;
+                if (nb.id != null) {
+                    const found = entry.data.notebooks.findIndex(x => x && x.id === nb.id);
+                    if (found >= 0) delIdx = found;
+                }
+                entry.data.notebooks.splice(delIdx, 1);
+                entry.data.lastModified = Date.now();
                 entry.updatedAt = firebase.database.ServerValue.TIMESTAMP;
                 await ref.set(entry);
             }
