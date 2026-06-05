@@ -5756,7 +5756,7 @@ function rpSubscribe(k){
 
     if (localStorage.getItem(RP_LS.agent)==='1'){
         const cb=document.getElementById('agentCheckbox');
-        if(cb){ cb.checked=true; rpAgentOn=true; const at=document.getElementById('agentToggle'); if(at) at.classList.add('on'); rpLog('✅ Agent restored ON.'); }
+        if(cb){ cb.checked=true; rpAgentOn=true; const at=document.getElementById('agentToggle'); if(at) at.classList.add('on'); rpLog('✅ Agent restored ON.'); rpStartKeepAlive(); rpArmKeepAliveOnGesture(); rpAgentProcess(); }
     }
 }
 
@@ -5803,7 +5803,7 @@ function applyPrinterFromDirectory(){
 function normalizeIP(ip){ return (ip||'').split('.').map(o=>{const n=parseInt(o,10);return isNaN(n)?o:String(n);}).join('.'); }
 function rawSendZPL(zpl, ip, port){
     ip=normalizeIP(ip); port=port||'9100';
-    return fetch(`http://${ip}:${port}`,{ method:'POST', body:zpl, headers:{'Content-Type':'text/plain','X-Request-ID':Date.now()+'-'+Math.random().toString(36).slice(2,9)}, mode:'no-cors', cache:'no-cache', keepalive:true });
+    return fetch(`http://${ip}:${port}`,{ method:'POST', body:zpl, headers:{'Content-Type':'text/plain','X-Request-ID':Date.now()+'-'+Math.random().toString(36).slice(2,9)}, mode:'no-cors', cache:'no-cache' });
 }
 
 /* ---- Job creation ---- */
@@ -5851,36 +5851,66 @@ function toggleAgent(){
     rpAgentOn=document.getElementById('agentCheckbox').checked;
     localStorage.setItem(RP_LS.agent, rpAgentOn?'1':'0');
     const at=document.getElementById('agentToggle'); if(at) at.classList.toggle('on', rpAgentOn);
-    rpLog(rpAgentOn?'✅ Agent ON — watching for queued jobs.':'⏸ Agent OFF.');
-    if(rpAgentOn) rpAgentProcess();
+    if(rpAgentOn){ rpStartKeepAlive(); rpLog('✅ Agent ON — watching for jobs (stays active when backgrounded).'); rpAgentProcess(); }
+    else { rpStopKeepAlive(); rpLog('⏸ Agent OFF.'); }
 }
+
+/* ---- Background keep-alive: hidden tabs throttle timers and can stall the agent.
+   A near-silent Web Audio loop marks the tab "audible" so the browser stops
+   throttling it; a visibility kick + slow poll are belt-and-suspenders. ---- */
+let rpAudioCtx=null, rpKeepOsc=null, rpPollTimer=null, rpGestureArmed=false;
+function rpStartKeepAlive(){
+    try{
+        const AC=window.AudioContext||window.webkitAudioContext;
+        if(AC){
+            if(!rpAudioCtx) rpAudioCtx=new AC();
+            if(rpAudioCtx.state==='suspended') rpAudioCtx.resume().catch(()=>{});
+            if(!rpKeepOsc){
+                const osc=rpAudioCtx.createOscillator(), g=rpAudioCtx.createGain();
+                g.gain.value=0.0001; osc.frequency.value=440;
+                osc.connect(g); g.connect(rpAudioCtx.destination); osc.start();
+                rpKeepOsc=osc;
+            }
+        }
+    }catch(e){ console.warn('[RP] keepalive audio failed', e); }
+    if(!rpPollTimer) rpPollTimer=setInterval(()=>{ if(rpAgentOn) rpAgentProcess(); }, 15000);
+}
+function rpStopKeepAlive(){
+    try{ if(rpKeepOsc){ rpKeepOsc.stop(); rpKeepOsc.disconnect(); rpKeepOsc=null; } }catch(e){}
+    if(rpPollTimer){ clearInterval(rpPollTimer); rpPollTimer=null; }
+}
+function rpArmKeepAliveOnGesture(){
+    if(rpGestureArmed) return; rpGestureArmed=true;
+    const h=()=>{ if(rpAgentOn){ try{ if(rpAudioCtx&&rpAudioCtx.state==='suspended') rpAudioCtx.resume(); }catch(e){} rpStartKeepAlive(); } };
+    document.addEventListener('pointerdown',h,{passive:true});
+    document.addEventListener('keydown',h);
+}
+document.addEventListener('visibilitychange', ()=>{ if(!document.hidden && rpAgentOn) rpAgentProcess(); });
+
 async function rpAgentProcess(){
     if(!rpAgentOn||rpProcessing||!rpReady) return;
     const k=getSyncKey(); if(!k) return;
     const queued=rpJobs.filter(j=>j.status==='queued');
     if(!queued.length) return;
     rpProcessing=true;
-    for(const job of queued){
-        const sref=rpDB.ref(rpPaths(k).jobs+'/'+job.id+'/status');
-        let claimed=false;
-        try{ const res=await sref.transaction(cur=> cur==='queued' ? 'printing' : undefined); claimed=res.committed && res.snapshot.val()==='printing'; }
-        catch(e){ rpLog('⚠️ claim error: '+e.message); continue; }
-        if(!claimed) continue; // another agent grabbed it
-        const base=rpDB.ref(rpPaths(k).jobs+'/'+job.id);
-        base.update({ claimedBy:rpDeviceName() });
-        rpLog(`🖨️ Printing "${job.label||'job'}" → ${job.printerName} (${job.printerIP})`);
-        try{
-            await rawSendZPL(job.zpl, job.printerIP, job.port);
-            await new Promise(r=>setTimeout(r,700));
-            await base.update({ status:'sent', finishedAt:firebase.database.ServerValue.TIMESTAMP });
+    try{
+        for(const job of queued){
+            const sref=rpDB.ref(rpPaths(k).jobs+'/'+job.id+'/status');
+            let claimed=false;
+            try{ const res=await sref.transaction(cur=> cur==='queued' ? 'printing' : undefined); claimed=res.committed && res.snapshot.val()==='printing'; }
+            catch(e){ rpLog('⚠️ claim error: '+e.message); continue; }
+            if(!claimed) continue; // another agent grabbed it
+            const base=rpDB.ref(rpPaths(k).jobs+'/'+job.id);
+            rpLog(`🖨️ Printing "${job.label||'job'}" → ${job.printerName} (${job.printerIP})`);
+            // Fire-and-forget: Zebra port 9100 is a raw socket (not HTTP), so the
+            // fetch promise may never resolve — never await it or the loop stalls.
+            try{ rawSendZPL(job.zpl, job.printerIP, job.port).catch(()=>{}); }
+            catch(e){ await base.update({ status:'error', error:String((e&&e.message)||e), claimedBy:rpDeviceName() }); rpLog(`   ✗ ${(e&&e.message)||e}`); continue; }
+            // Awaiting this websocket write also paces successive fetches (no timers).
+            await base.update({ status:'sent', claimedBy:rpDeviceName(), finishedAt:firebase.database.ServerValue.TIMESTAMP });
             rpLog(`   ✓ dispatched to ${job.printerIP}`);
-        }catch(e){
-            await base.update({ status:'error', error:String((e&&e.message)||e) });
-            rpLog(`   ✗ ${(e&&e.message)||e}`);
         }
-        await new Promise(r=>setTimeout(r,300));
-    }
-    rpProcessing=false;
+    } finally { rpProcessing=false; }
 }
 
 /* ---- Job list UI ---- */
