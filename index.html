@@ -2850,6 +2850,7 @@ postHost({ type:'bw:ready' });
             <button class="tab-btn active" data-tab="designer" onclick="switchTopTab('designer')">🏷️ Designer</button>
             <button class="tab-btn" data-tab="printers" onclick="switchTopTab('printers')">🖨️ Printers</button>
             <button class="tab-btn" data-tab="remote" onclick="switchTopTab('remote')">📡 Remote Print</button>
+            <button class="tab-btn" data-tab="floormap" onclick="switchTopTab('floormap')">🗺️ Floor Map</button>
         </div>
 
         <div id="tab-designer" class="tab-panel active">
@@ -5937,6 +5938,644 @@ function clearFinishedJobs(){ const k=getSyncKey(); if(!rpReady||!k) return; rpJ
 try { rpInit(); } catch(e){ console.error('[RP] startup', e); }
 /* ════════════════ end remote print module ════════════════ */
 
+/* ════════════════ FLOOR MAP QUICK PRINT ════════════════ */
+(function(){
+'use strict';
+
+/* ─────────────────────────────────────────────────────────────
+   DESK REGISTRY
+   Every cell on the floor — named people AND unnamed "—" desks.
+   null in GRID_LAYOUT = true empty gap (no cell rendered).
+───────────────────────────────────────────────────────────── */
+const DESKS = {
+    // Top row
+    philip:    'Philip',
+    top_d2:    '—',
+    lakia:     'Lakia',
+    top_d4:    '—',
+    julie:     'Julie',
+    // Cluster A
+    bryanna:   'Bryanna',
+    dani:      'Dani',
+    ferron:    'Ferron',
+    cassidy:   'Cassidy',
+    ryan:      'Ryan',
+    ted:       'Ted',
+    lizroebuck:'Liz Roebuck',
+    // Cluster B
+    clb_d1:    '—',
+    clb_d2:    '—',
+    clb_d3:    '—',
+    stephen:   'Stephen',
+    jada:      'Jada',
+    yamin:     'Yamin',
+    // Left island
+    li_d1:     '—',
+    david:     'David',
+    li_d3:     '—',
+    jason:     'Jason',
+    // Cluster C
+    haley:     'Haley',
+    marc:      'Marc',
+    samantha:  'Samantha',
+    // Cluster D
+    jlin:      "J'Lin",
+    cld_d2:    '—',
+    josh:      'Josh',
+    nataly:    'Nataly',
+    aaronia:   'Aaronia',
+    jerico:    'Jerico',
+    // Cluster E
+    chris:     'Chris',
+    becca:     'Becca',
+    peter:     'Peter',
+    harris:    'Harris',
+    tito:      'Tito',
+    aaron:     'Aaron',
+    // Bottom
+    jillian:   'Jillian',
+    jayla:     'Jayla',
+    // Floaters
+    andrew:    'Andrew',
+    kimeal:    'Kimeal',
+};
+
+/* ─────────────────────────────────────────────────────────────
+   GRID LAYOUT
+   Mirrors the screenshot exactly as a 2D grid.
+   The whole floor is a CSS grid with two "column zones":
+     • LEFT (cols 1-3):  Left Island, Floaters
+     • RIGHT (cols 5-9): Top row + all clusters
+   A gap column (col 4) separates them spatially.
+
+   We use a flat CSS grid (display:grid) on #fm-canvas with
+   explicit grid-template-columns. Each entry below is one cell:
+     { id }      → clickable desk cell
+     null        → empty gap (no element)
+     { gap }     → named wide gap (renders as empty spacer)
+
+   Layout is described row by row. The grid has 9 columns:
+   [left1] [left2] [left3] [gap] [right1] [right2] [right3] [right4] [right5]
+
+   Looking at the screenshot column mapping:
+   Right side: col1=pos1, col2=pos2, col3=pos3, skip, col4=pos5
+   (Cassidy sits in the 5th right slot, gap between Ferron and Cassidy)
+
+   We'll use 10 columns for flexibility:
+   L1  L2  L3  | spacer | R1  R2  R3  R4  R5
+    1   2   3       4      5   6   7   8   9
+───────────────────────────────────────────────────────────── */
+
+/* Each row = array of 9 items (L1..L3, spacer, R1..R5).
+   null = invisible gap cell. string = desk id. '__zone__' + name = zone header. */
+const GRID_ROWS = [
+    //  L1       L2       L3       gap     R1         R2         R3         R4       R5
+    // ── Top row ──────────────────────────────────────────────────────────────────
+    [   null,    null,    null,    null,   'philip',  'top_d2',  'lakia',   'top_d4','julie'    ],
+
+    // ── Cluster A header ─────────────────────────────────────────────────────────
+    [   null,    null,    null,    null,   'bryanna', 'dani',    'ferron',  null,    'cassidy'  ],
+    [   null,    null,    null,    null,   'ryan',    'ted',     'lizroebuck', null, null       ],
+
+    // ── Cluster B ────────────────────────────────────────────────────────────────
+    [   null,    null,    null,    null,   'clb_d1',  'clb_d2',  'clb_d3',  null,    null       ],
+    [   null,    null,    null,    null,   'stephen', 'jada',    'yamin',   null,    null       ],
+
+    // ── Left island (rows align with cluster B/C gap) ────────────────────────────
+    [   'li_d1', 'david', 'li_d3', null,   null,      null,      null,      null,    null       ],
+    [   'jason', null,    null,    null,   null,      null,      null,      null,    null       ],
+
+    // ── Cluster C ────────────────────────────────────────────────────────────────
+    [   null,    null,    null,    null,   'haley',   'marc',    'samantha', null,   null       ],
+
+    // ── Cluster D ────────────────────────────────────────────────────────────────
+    [   null,    null,    null,    null,   'jlin',    'cld_d2',  'josh',    null,    null       ],
+    [   null,    null,    null,    null,   'nataly',  'aaronia', 'jerico',  null,    null       ],
+
+    // ── Cluster E ────────────────────────────────────────────────────────────────
+    [   null,    null,    null,    null,   'chris',   'becca',   'peter',   null,    null       ],
+    [   null,    null,    null,    null,   'harris',  'tito',    'aaron',   null,    null       ],
+
+    // ── Bottom ───────────────────────────────────────────────────────────────────
+    [   null,    null,    null,    null,   null,      'jillian', 'jayla',   null,    null       ],
+
+    // ── Floaters (left side, below island) ───────────────────────────────────────
+    [   'andrew','kimeal', null,   null,   null,      null,      null,      null,    null       ],
+];
+
+/* ─────────────────────────────────────────────────────────────
+   STORAGE — localStorage + Firebase (via rpDB if sync key set)
+───────────────────────────────────────────────────────────── */
+const FM_KEY     = 'floormap_desk_ips_v1';
+const FM_FB_PATH = k => `rooms/${k}/labelStation/floorMapIps`;
+
+function fmLoad() {
+    try { return JSON.parse(localStorage.getItem(FM_KEY)||'{}'); } catch(e){ return {}; }
+}
+function fmSave(ips) {
+    try { localStorage.setItem(FM_KEY, JSON.stringify(ips)); } catch(e){}
+    // Also push to Firebase if sync is ready
+    const k = (typeof getSyncKey === 'function') ? getSyncKey() : '';
+    if (k && typeof rpDB !== 'undefined' && rpDB) {
+        try { rpDB.ref(FM_FB_PATH(k)).set(ips).catch(()=>{}); } catch(e){}
+    }
+}
+function fmPullFirebase() {
+    const k = (typeof getSyncKey === 'function') ? getSyncKey() : '';
+    if (!k || typeof rpDB === 'undefined' || !rpDB) return;
+    try {
+        rpDB.ref(FM_FB_PATH(k)).once('value').then(snap => {
+            const v = snap.val();
+            if (v && typeof v === 'object') {
+                deskIps = v;
+                try { localStorage.setItem(FM_KEY, JSON.stringify(v)); } catch(e){}
+                renderMap();
+            }
+        }).catch(()=>{});
+    } catch(e){}
+}
+
+/* ─────────────────────────────────────────────────────────────
+   BUILD TAB PANEL
+───────────────────────────────────────────────────────────── */
+const panel = document.createElement('div');
+panel.id = 'tab-floormap';
+panel.className = 'tab-panel';
+panel.innerHTML = `
+<style>
+/* ── Tab panel shell ── */
+#tab-floormap {
+    padding: 14px 16px 20px;
+    overflow-y: auto;
+    max-height: calc(100vh - 96px);
+    background: #f1f5f9;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    font-size: 13px;
+}
+
+/* ── Top toolbar ── */
+.fm-bar {
+    display: flex; align-items: center; gap: 10px;
+    flex-wrap: wrap; margin-bottom: 12px;
+}
+.fm-bar-title { font-size: 16px; font-weight: 700; color: #0f172a; flex: 1; }
+.fm-mode-btn {
+    padding: 6px 14px; border-radius: 8px; border: 2px solid #cbd5e1;
+    background: #fff; font-size: 12px; font-weight: 700; cursor: pointer; color: #475569;
+    transition: .13s;
+}
+.fm-mode-btn.on { background: #1d4ed8; color: #fff; border-color: #1d4ed8; }
+.fm-btn-clear {
+    padding: 6px 12px; border-radius: 8px; border: 1.5px solid #fca5a5;
+    background: #fff; font-size: 12px; font-weight: 600; color: #b91c1c; cursor: pointer;
+}
+.fm-port-wrap { display: flex; align-items: center; gap: 5px; color: #475569; font-size: 12px; }
+.fm-port-input { width: 64px; border: 1.5px solid #cbd5e1; border-radius: 6px; padding: 5px 7px; font-size: 12px; }
+.fm-hint { font-size: 11px; color: #64748b; margin: 0 0 12px; line-height: 1.5; }
+
+/* ── Canvas (the spatial grid) ── */
+#fm-canvas {
+    display: grid;
+    /* 3 left cols | 1 spacer | 5 right cols */
+    grid-template-columns: repeat(3, 84px) 20px repeat(5, 84px);
+    gap: 6px;
+    align-items: start;
+    width: max-content;
+    max-width: 100%;
+    overflow-x: auto;
+}
+
+/* ── Desk cell ── */
+.fm-cell {
+    width: 84px;
+    background: #fff;
+    border: 2px solid #cbd5e1;
+    border-radius: 8px;
+    padding: 6px 4px 4px;
+    text-align: center;
+    cursor: pointer;
+    user-select: none;
+    transition: border-color .12s, background .12s, transform .1s, box-shadow .12s;
+    position: relative;
+    min-height: 52px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+}
+.fm-cell:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,.13); }
+.fm-cell:active { transform: translateY(0); }
+
+/* Named desk vs unnamed dash desk */
+.fm-cell.named  { border-color: #94a3b8; }
+.fm-cell.dash   { border-color: #cbd5e1; background: #f8fafc; }
+.fm-cell.dash .fm-name { color: #94a3b8; font-size: 14px; letter-spacing: 2px; }
+
+/* Has IP assigned */
+.fm-cell.has-ip { border-color: #3b82f6; background: #eff6ff; }
+.fm-cell.dash.has-ip { border-color: #93c5fd; background: #f0f7ff; }
+
+/* Print feedback */
+.fm-cell.printing { border-color: #16a34a !important; background: #dcfce7 !important; animation: fm-pulse .6s ease infinite alternate; }
+.fm-cell.sent     { border-color: #22c55e !important; background: #f0fdf4 !important; }
+.fm-cell.err      { border-color: #ef4444 !important; background: #fef2f2 !important; }
+@keyframes fm-pulse { from { box-shadow: 0 0 0 0 rgba(22,163,74,.4); } to { box-shadow: 0 0 0 6px rgba(22,163,74,0); } }
+
+/* No IP in print mode */
+.fm-cell.no-ip-print { cursor: not-allowed; opacity: .45; }
+
+/* Text inside cell */
+.fm-name {
+    font-size: 11.5px; font-weight: 700; color: #1e293b;
+    line-height: 1.2; word-break: break-word;
+}
+.fm-ip {
+    font-size: 9.5px; color: #3b82f6; font-weight: 500;
+    margin-top: 3px; white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; max-width: 76px;
+}
+.fm-no-ip { font-size: 9px; color: #94a3b8; margin-top: 3px; }
+.fm-cell-status {
+    font-size: 9px; font-weight: 700; height: 11px; margin-top: 2px;
+    color: #16a34a;
+}
+
+/* Edit mode: IP input sits below the name inside the cell */
+.fm-ip-inp {
+    width: 76px; border: 1.5px solid #3b82f6; border-radius: 5px;
+    font-size: 10px; padding: 2px 5px; margin-top: 4px;
+    text-align: center; background: #fff; color: #0f172a; outline: none;
+}
+.fm-ip-inp:focus { box-shadow: 0 0 0 2px rgba(59,130,246,.3); }
+
+/* Spacer column (col 4) */
+.fm-spacer { width: 20px; }
+
+/* Gap cell (null slot) */
+.fm-gap { width: 84px; height: 52px; }
+
+/* Toast */
+#fm-toast {
+    position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+    background: #0f172a; color: #fff; padding: 9px 18px; border-radius: 10px;
+    font-size: 13px; font-weight: 600; z-index: 9999;
+    opacity: 0; transition: opacity .2s; pointer-events: none; white-space: nowrap;
+}
+#fm-toast.show { opacity: 1; }
+
+/* Legend */
+.fm-legend {
+    display: flex; gap: 14px; flex-wrap: wrap;
+    margin-top: 14px; font-size: 11px; color: #475569;
+    align-items: center;
+}
+.fm-legend-dot {
+    width: 12px; height: 12px; border-radius: 3px; border: 2px solid;
+    display: inline-block; vertical-align: middle; margin-right: 3px;
+}
+/* Notebook mode */
+.fm-cell.nb-mode { border-color: #a78bfa; background: #faf5ff; cursor: pointer; }
+.fm-cell.nb-mode:hover { border-color: #7c3aed; background: #ede9fe; }
+.fm-cell.nb-mode .fm-name { color: #4c1d95; }
+
+/* Notebook modal */
+#fm-nb-modal {
+    display: none; position: fixed; inset: 0; z-index: 10000;
+    background: rgba(0,0,0,.5); align-items: center; justify-content: center;
+}
+#fm-nb-modal.open { display: flex; }
+.fm-nb-sheet {
+    background: #fff; border-radius: 14px; padding: 22px 22px 18px;
+    width: 320px; max-width: 90vw;
+    box-shadow: 0 20px 60px rgba(0,0,0,.25);
+    display: flex; flex-direction: column; gap: 12px;
+}
+.fm-nb-sheet h3 { margin: 0; font-size: 16px; color: #0f172a; }
+.fm-nb-sheet label { font-size: 12px; color: #475569; font-weight: 600; }
+.fm-nb-inp {
+    width: 100%; border: 1.5px solid #cbd5e1; border-radius: 8px;
+    padding: 9px 11px; font-size: 14px; color: #0f172a; outline: none;
+    box-sizing: border-box;
+}
+.fm-nb-inp:focus { border-color: #7c3aed; box-shadow: 0 0 0 3px rgba(124,58,237,.15); }
+.fm-nb-foot { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
+.fm-nb-cancel { padding: 8px 16px; border-radius: 8px; border: 1.5px solid #e2e8f0; background: #fff; font-size: 13px; font-weight: 600; cursor: pointer; color: #475569; }
+.fm-nb-create { padding: 8px 18px; border-radius: 8px; border: none; background: #7c3aed; color: #fff; font-size: 13px; font-weight: 700; cursor: pointer; }
+.fm-nb-create:disabled { opacity: .5; cursor: not-allowed; }
+.fm-nb-status { font-size: 12px; min-height: 16px; color: #059669; font-weight: 600; }
+.fm-nb-err { color: #dc2626; }
+</style>
+
+<div id="fm-toast"></div>
+
+<div class="fm-bar">
+    <span class="fm-bar-title">🗺️ Floor Map Quick Print</span>
+    <button class="fm-mode-btn on"  id="fm-mode-print">🖨️ Print</button>
+    <button class="fm-mode-btn"     id="fm-mode-edit">✏️ Edit IPs</button>
+    <button class="fm-mode-btn"     id="fm-mode-notebook">📓 Notebook</button>
+    <div class="fm-port-wrap">Port: <input class="fm-port-input" id="fm-port" value="9100" type="number" min="1" max="65535"></div>
+    <button class="fm-btn-clear"    id="fm-clear-all">🗑 Clear</button>
+</div>
+<p class="fm-hint">
+    <strong>Print:</strong> tap a desk to send your label to its printer.&nbsp;
+    <strong>Edit IPs:</strong> type an IP for each desk. Blue = assigned.&nbsp;
+    <strong>Notebook:</strong> tap any desk to create a notebook there (purple = notebook mode).
+</p>
+
+<div id="fm-canvas"><!-- rendered by JS --></div>
+
+<!-- Notebook creation modal -->
+<div id="fm-nb-modal">
+    <div class="fm-nb-sheet">
+        <h3>📓 New Notebook</h3>
+        <div>
+            <label>Desk</label>
+            <input class="fm-nb-inp" id="fm-nb-desk" readonly style="background:#f8fafc; color:#64748b;">
+        </div>
+        <div>
+            <label>Notebook title</label>
+            <input class="fm-nb-inp" id="fm-nb-title" placeholder="e.g. Notes, Accession Log…" maxlength="80">
+        </div>
+        <div class="fm-nb-status" id="fm-nb-status"></div>
+        <div class="fm-nb-foot">
+            <button class="fm-nb-cancel" id="fm-nb-cancel">Cancel</button>
+            <button class="fm-nb-create" id="fm-nb-create">Create →</button>
+        </div>
+    </div>
+</div>
+
+<div class="fm-legend">
+    <span><span class="fm-legend-dot" style="border-color:#3b82f6;background:#eff6ff;"></span>IP assigned</span>
+    <span><span class="fm-legend-dot" style="border-color:#94a3b8;background:#fff;"></span>Named desk</span>
+    <span><span class="fm-legend-dot" style="border-color:#cbd5e1;background:#f8fafc;"></span>Unnamed desk</span>
+    <span><span class="fm-legend-dot" style="border-color:#22c55e;background:#f0fdf4;"></span>Sent ✓</span>
+    <span><span class="fm-legend-dot" style="border-color:#ef4444;background:#fef2f2;"></span>Error</span>
+    <span><span class="fm-legend-dot" style="border-color:#a78bfa;background:#faf5ff;"></span>Notebook mode</span>
+</div>
+`;
+document.querySelector('.main-container').appendChild(panel);
+
+/* ─────────────────────────────────────────────────────────────
+   STATE
+───────────────────────────────────────────────────────────── */
+let fmMode = 'print';
+let deskIps = fmLoad();
+const fmTimers = {};
+
+/* ─────────────────────────────────────────────────────────────
+   RENDER
+───────────────────────────────────────────────────────────── */
+function renderMap() {
+    const canvas = document.getElementById('fm-canvas');
+    if (!canvas) return;
+    canvas.innerHTML = '';
+
+    GRID_ROWS.forEach(row => {
+        row.forEach((cellId, colIdx) => {
+            // Column 4 (0-indexed: 3) is always the spacer
+            if (colIdx === 3) {
+                const sp = document.createElement('div');
+                sp.className = 'fm-spacer';
+                canvas.appendChild(sp);
+                return;
+            }
+
+            if (cellId === null) {
+                const gap = document.createElement('div');
+                gap.className = 'fm-gap';
+                canvas.appendChild(gap);
+                return;
+            }
+
+            const label = DESKS[cellId] || cellId;
+            const ip = deskIps[cellId] || '';
+            const isDash = label === '—';
+
+            const cell = document.createElement('div');
+            cell.className = 'fm-cell ' + (isDash ? 'dash' : 'named') + (ip ? ' has-ip' : '') + (fmMode === 'notebook' ? ' nb-mode' : '');
+            cell.dataset.id = cellId;
+
+            // Name
+            const nameEl = document.createElement('div');
+            nameEl.className = 'fm-name';
+            nameEl.textContent = label;
+            cell.appendChild(nameEl);
+
+            if (fmMode === 'edit') {
+                // IP input
+                const inp = document.createElement('input');
+                inp.className = 'fm-ip-inp';
+                inp.type = 'text';
+                inp.placeholder = '10.x.x.x';
+                inp.value = ip;
+                inp.addEventListener('pointerdown', e => e.stopPropagation()); // prevent cell click
+                inp.addEventListener('blur', () => {
+                    const v = inp.value.trim();
+                    if (v) deskIps[cellId] = v; else delete deskIps[cellId];
+                    fmSave(deskIps);
+                    renderMap();
+                });
+                inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); });
+                cell.appendChild(inp);
+            } else {
+                // IP badge
+                const badge = document.createElement('div');
+                badge.className = ip ? 'fm-ip' : 'fm-no-ip';
+                badge.textContent = ip || (isDash ? '' : 'no IP');
+                cell.appendChild(badge);
+
+                // Status line
+                const statusEl = document.createElement('div');
+                statusEl.className = 'fm-cell-status';
+                statusEl.id = 'fms-' + cellId;
+                cell.appendChild(statusEl);
+
+                if (fmMode === 'notebook') {
+                    cell.style.cursor = 'pointer';
+                    cell.title = 'Create a notebook for ' + label;
+                    cell.addEventListener('click', () => fmNewNotebook(cellId, label));
+                } else if (ip) {
+                    cell.addEventListener('click', () => fmPrint(cellId, ip, label, cell));
+                } else {
+                    cell.classList.add('no-ip-print');
+                    cell.title = 'No IP — switch to Edit IPs to assign one';
+                }
+            }
+
+            canvas.appendChild(cell);
+        });
+    });
+}
+
+/* ─────────────────────────────────────────────────────────────
+   PRINT
+───────────────────────────────────────────────────────────── */
+function fmPrint(deskId, ip, label, cellEl) {
+    let zpl;
+    try { zpl = generateZPL(); } catch(e) { fmToast('❌ ZPL error: ' + e.message); return; }
+    if (!zpl || !zpl.trim()) { fmToast('⚠️ Label is empty — configure it in Designer first'); return; }
+
+    const port = document.getElementById('fm-port')?.value || '9100';
+    const statusEl = document.getElementById('fms-' + deskId);
+
+    cellEl.classList.add('printing');
+    if (statusEl) statusEl.textContent = '…';
+
+    fetch(`http://${ip}:${port}`, {
+        method: 'POST', body: zpl,
+        headers: { 'Content-Type': 'text/plain', 'X-Request-ID': Date.now()+'-'+Math.random().toString(36).slice(2,9) },
+        mode: 'no-cors', cache: 'no-cache', keepalive: true,
+    })
+    .then(() => {
+        cellEl.classList.remove('printing');
+        cellEl.classList.add('sent');
+        if (statusEl) statusEl.textContent = '✓ sent';
+        fmToast('🖨️ Sent → ' + label + ' (' + ip + ')');
+    })
+    .catch(err => {
+        cellEl.classList.remove('printing');
+        cellEl.classList.add('err');
+        if (statusEl) statusEl.textContent = '✗ error';
+        fmToast('❌ ' + (err.message || 'Network error'));
+    })
+    .finally(() => {
+        clearTimeout(fmTimers[deskId]);
+        fmTimers[deskId] = setTimeout(() => {
+            cellEl.classList.remove('sent', 'err');
+            if (statusEl) statusEl.textContent = '';
+        }, 3500);
+    });
+}
+
+/* ─────────────────────────────────────────────────────────────
+   TOAST
+───────────────────────────────────────────────────────────── */
+let fmToastTimer;
+function fmToast(msg) {
+    const t = document.getElementById('fm-toast');
+    if (!t) return;
+    t.textContent = msg; t.classList.add('show');
+    clearTimeout(fmToastTimer);
+    fmToastTimer = setTimeout(() => t.classList.remove('show'), 3200);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   CONTROLS — mode buttons
+───────────────────────────────────────────────────────────── */
+function fmSetMode(m) {
+    fmMode = m;
+    ['print','edit','notebook'].forEach(id => {
+        document.getElementById('fm-mode-'+id)?.classList.toggle('on', id === m);
+    });
+    renderMap();
+}
+document.getElementById('fm-mode-print'   ).addEventListener('click', () => fmSetMode('print'));
+document.getElementById('fm-mode-edit'    ).addEventListener('click', () => fmSetMode('edit'));
+document.getElementById('fm-mode-notebook').addEventListener('click', () => fmSetMode('notebook'));
+document.getElementById('fm-clear-all').addEventListener('click', () => {
+    if (!confirm('Clear all IP assignments from the floor map?')) return;
+    deskIps = {}; fmSave(deskIps); renderMap();
+});
+
+/* ─────────────────────────────────────────────────────────────
+   NOTEBOOK CREATION via postMessage → parent Lab Notebook app
+───────────────────────────────────────────────────────────── */
+let fmNbPending = null; // { deskId, deskLabel, resolve }
+
+function fmNewNotebook(deskId, deskLabel) {
+    const modal  = document.getElementById('fm-nb-modal');
+    const deskEl = document.getElementById('fm-nb-desk');
+    const titleEl= document.getElementById('fm-nb-title');
+    const statusEl=document.getElementById('fm-nb-status');
+    const createBtn=document.getElementById('fm-nb-create');
+
+    deskEl.value  = deskLabel;
+    titleEl.value = '';
+    statusEl.textContent = '';
+    statusEl.className = 'fm-nb-status';
+    createBtn.disabled = false;
+    modal.classList.add('open');
+    setTimeout(() => titleEl.focus(), 80);
+
+    fmNbPending = { deskId, deskLabel };
+}
+
+function fmNbClose() {
+    document.getElementById('fm-nb-modal')?.classList.remove('open');
+    fmNbPending = null;
+}
+
+async function fmNbSubmit() {
+    if (!fmNbPending) return;
+    const titleEl  = document.getElementById('fm-nb-title');
+    const statusEl = document.getElementById('fm-nb-status');
+    const createBtn= document.getElementById('fm-nb-create');
+
+    const title = titleEl.value.trim();
+    if (!title) { titleEl.focus(); return; }
+
+    createBtn.disabled = true;
+    statusEl.textContent = 'Creating…';
+    statusEl.className = 'fm-nb-status';
+
+    const { deskId, deskLabel } = fmNbPending;
+    const rid = 'fmnb_' + Date.now();
+
+    // Send to parent Lab Notebook window
+    window.parent.postMessage({
+        __fm: true,
+        type: 'fm:new-notebook',
+        deskId,
+        deskLabel,
+        title,
+        _rid: rid,
+    }, '*');
+
+    // Wait for response (timeout 12 s)
+    const result = await new Promise(resolve => {
+        fmNbPending._resolve = resolve;
+        setTimeout(() => resolve({ ok: false, error: 'Timed out — is the Lab Notebook connected?' }), 12000);
+    });
+
+    if (result.ok) {
+        statusEl.textContent = '✓ Notebook created!';
+        statusEl.className = 'fm-nb-status';
+        fmToast('📓 Created "' + title + '" for desk ' + deskLabel);
+        setTimeout(fmNbClose, 1200);
+    } else {
+        statusEl.textContent = '✗ ' + (result.error || 'Failed');
+        statusEl.className = 'fm-nb-status fm-nb-err';
+        createBtn.disabled = false;
+    }
+}
+
+// Listen for the parent's response
+window.addEventListener('message', e => {
+    const m = e.data;
+    if (!m || !m.__fmhost) return;
+    if (m.type === 'fm:nb-result' && fmNbPending && typeof fmNbPending._resolve === 'function') {
+        fmNbPending._resolve({ ok: m.ok, error: m.error });
+    }
+});
+
+document.getElementById('fm-nb-cancel').addEventListener('click', fmNbClose);
+document.getElementById('fm-nb-create').addEventListener('click', fmNbSubmit);
+document.getElementById('fm-nb-title' ).addEventListener('keydown', e => { if (e.key === 'Enter') fmNbSubmit(); if (e.key === 'Escape') fmNbClose(); });
+document.getElementById('fm-nb-modal' ).addEventListener('click', e => { if (e.target.id === 'fm-nb-modal') fmNbClose(); });
+
+/* Hook switchTopTab so the map renders fresh each time the tab opens */
+const _fmOrigSwitch = window.switchTopTab;
+window.switchTopTab = function(tab) {
+    _fmOrigSwitch && _fmOrigSwitch(tab);
+    if (tab === 'floormap') { deskIps = fmLoad(); renderMap(); fmPullFirebase(); }
+};
+
+renderMap(); // initial render
+fmPullFirebase(); // pull any cloud-saved IPs
+
+})();
+/* ════════════════ end floor map module ════════════════ */
+
+try { rpInit(); } catch(e){ console.error('[RP] startup', e); }
+/* ════════════════ end remote print module ════════════════ */
+
     <\/script>
 </body>
 </html>
@@ -6715,6 +7354,50 @@ function closeBuilder() {
 }
 
 // Messages coming up from the Branchwork iframe
+// ─── Floor Map → parent bridge (fm:new-notebook) ─────────────────────────────
+window.addEventListener('message', async (e) => {
+    const m = e.data;
+    if (!m || !m.__fm) return;
+    const src = e.source;
+
+    if (m.type === 'fm:new-notebook') {
+        if (!state.room || !state.sanitizedName || !db) {
+            src && src.postMessage({ __fmhost: true, type: 'fm:nb-result', ok: false, error: 'Lab Notebook not connected — log in first.' }, '*');
+            return;
+        }
+        try {
+            const deskHint = m.deskLabel || m.deskId || 'desk';
+            const title    = (m.title || 'Notes').trim();
+            const newNb = {
+                id: Date.now(),
+                title,
+                pages: [''],
+                pageSettings: [{ type: 'text', bg: 'plain' }],
+                createdAt: Date.now(),
+                lastModified: Date.now(),
+            };
+            const sanDesk = sanitize(deskHint);
+            const ref = db.ref(`rooms/${state.room}/playerDeskDataByName/${state.sanitizedName}/${sanDesk}`);
+            const snap = await ref.once('value');
+            const existing = snap.val() || { deskName: deskHint, ownerName: state.playerName, data: { notebooks: [] } };
+            existing.deskName  = existing.deskName  || deskHint;
+            existing.ownerName = state.playerName;
+            if (!existing.data) existing.data = {};
+            if (!Array.isArray(existing.data.notebooks)) existing.data.notebooks = [];
+            existing.data.notebooks.push(newNb);
+            existing.data.lastModified = newNb.lastModified;
+            existing.updatedAt = firebase.database.ServerValue.TIMESTAMP;
+            await ref.set(existing);
+            await loadNotebooks();
+            src && src.postMessage({ __fmhost: true, type: 'fm:nb-result', ok: true }, '*');
+            setStatus('\u{1F4D3} Notebook "' + title + '" created for ' + deskHint, 'ok');
+            setTimeout(() => setStatus('', ''), 3000);
+        } catch (err) {
+            src && src.postMessage({ __fmhost: true, type: 'fm:nb-result', ok: false, error: err.message || String(err) }, '*');
+        }
+    }
+});
+
 window.addEventListener('message', async (e) => {
     const m = e.data;
     if (!m || !m.__bw) return;
