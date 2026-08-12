@@ -2842,6 +2842,26 @@ postHost({ type:'bw:ready' });
         .switch input:checked + .slider:before { transform:translateX(24px); }
         .log-box { background:#0b1020; color:#9fe8c0; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px;
                    border-radius:10px; padding:12px; max-height:220px; overflow-y:auto; white-space:pre-wrap; }
+        /* ===== BACKUP / IMPORT SHEET ===== */
+        #rpImportScrim { display:none; position:fixed; inset:0; z-index:10001; background:rgba(15,23,42,.55);
+                         align-items:center; justify-content:center; padding:16px; }
+        #rpImportScrim.open { display:flex; }
+        .rp-imp-sheet { background:#fff; border-radius:14px; padding:22px; width:100%; max-width:460px;
+                        max-height:90vh; overflow-y:auto; box-shadow:0 20px 50px rgba(0,0,0,.3); }
+        .rp-imp-sheet h3 { margin:0 0 6px; font-size:19px; color:#111827; }
+        .rp-imp-sheet p.sub { color:#6b7280; font-size:13px; margin:0 0 14px; line-height:1.5; }
+        .rp-imp-sheet textarea { width:100%; min-height:120px; padding:10px; border:2px solid #d1d5db;
+                                 border-radius:8px; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px; }
+        .rp-imp-opt { display:flex; align-items:center; gap:8px; margin-top:12px; font-size:13px; color:#374151; }
+        .rp-imp-opt input { width:18px; height:18px; }
+        .rp-imp-foot { display:flex; gap:8px; flex-wrap:wrap; margin-top:16px; }
+        .rp-imp-foot button { flex:1; min-width:110px; padding:11px; border:none; border-radius:8px;
+                              font-size:14px; font-weight:700; cursor:pointer; }
+        .rp-imp-file { background:#e0e7ff; color:#3730a3; }
+        .rp-imp-go   { background:#10b981; color:#fff; }
+        .rp-imp-x    { background:#e5e7eb; color:#374151; }
+        .rp-imp-msg  { font-size:13px; font-weight:600; margin-top:10px; min-height:18px; color:#059669; }
+        .rp-imp-msg.bad { color:#b91c1c; }
     </style>
 </head>
 <body>
@@ -3343,8 +3363,30 @@ postHost({ type:'bw:ready' });
 
                 <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:16px;">
                     <button class="btn-primary" style="padding:10px 16px;" onclick="addPrinterRow()">➕ Add Printer</button>
-                    <button class="btn-secondary" style="padding:10px 16px;" onclick="seedPrintersFromDefaults()">↺ Load Built-in List</button>
+                    <button class="btn-secondary" style="padding:10px 16px;" onclick="seedPrintersFromDefaults()">↺ Load Defaults</button>
+                    <button class="btn-secondary" style="padding:10px 16px; background:#7c3aed;" onclick="rpSaveCurrentAsDefaults()">⭐ Save current as defaults</button>
+                    <button class="btn-secondary" style="padding:10px 16px; background:#0f766e;" onclick="rpExportDefaultsCode()">⤓ Export as code</button>
+                    <button class="btn-secondary" style="padding:10px 16px; background:#1d4ed8;" onclick="rpExportBackup()">💾 Export JSON</button>
+                    <button class="btn-secondary" style="padding:10px 16px; background:#b45309;" onclick="rpOpenImport()">📂 Import JSON</button>
+                    <input type="file" id="rpImportFile" accept="application/json,.json" style="display:none;" onchange="rpImportFilePicked(event)">
                     <span id="printerSaveStatus" style="align-self:center; font-size:13px; color:#10b981;"></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===================== BACKUP IMPORT SHEET ===================== -->
+        <div id="rpImportScrim">
+            <div class="rp-imp-sheet">
+                <h3>📂 Import setup</h3>
+                <p class="sub">Load a <code>.json</code> backup — printers, the default printer, and floor-map desk names/IPs. Pick a file or paste the contents below.</p>
+                <textarea id="rpImportText" placeholder='{ "kind": "labelStation.backup", ... }' spellcheck="false"></textarea>
+                <label class="rp-imp-opt"><input type="checkbox" id="rpImportAsDefaults" checked> Also make this my saved defaults</label>
+                <label class="rp-imp-opt"><input type="checkbox" id="rpImportFloorMap" checked> Include floor-map desk names &amp; IPs</label>
+                <div class="rp-imp-msg" id="rpImportMsg"></div>
+                <div class="rp-imp-foot">
+                    <button class="rp-imp-x" onclick="rpCloseImport()">Cancel</button>
+                    <button class="rp-imp-file" onclick="document.getElementById('rpImportFile').click()">Choose file…</button>
+                    <button class="rp-imp-go" onclick="rpImportFromText()">Import</button>
                 </div>
             </div>
         </div>
@@ -5675,16 +5717,19 @@ const SEED_PRINTERS = [
 
 let rpDB=null, rpReady=false;
 let rpPrinters=[], rpDefaultId='', rpJobs=[];
-let rpPrintersRef=null, rpDefaultRef=null, rpJobsRef=null;
+let rpPrintersRef=null, rpDefaultRef=null, rpJobsRef=null, rpDefaultSetRef=null;
 let rpAgentOn=false, rpProcessing=false, rpSaveTimer=null;
-const RP_LS = { key:'rp.syncKey', agent:'rp.agent', device:'rp.device' };
+const RP_LS = { key:'rp.syncKey', agent:'rp.agent', device:'rp.device', defaults:'rp.defaultSet' };
+/* Floor-map localStorage keys, mirrored from the floor map module below so the
+   defaults set can capture and restore desk names/IPs too. */
+const FM_LS = { ips:'floormap_desk_ips_v1', names:'floormap_desk_names_v1', stamp:'floormap_stamp_v1' };
 
 function escHtml(s){ return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function escAttr(s){ return escHtml(s); }
 function sanitizeKey(s){ return (s||'').toLowerCase().replace(/[^a-z0-9_-]/g,'_'); }
 function getSyncKey(){ return (localStorage.getItem(RP_LS.key)||'').trim(); }
 function rpDeviceName(){ return localStorage.getItem(RP_LS.device)||'device'; }
-function rpPaths(k){ return { printers:`rooms/${k}/labelStation/printers`, defaultId:`rooms/${k}/labelStation/defaultPrinterId`, jobs:`rooms/${k}/labelStation/jobs` }; }
+function rpPaths(k){ return { printers:`rooms/${k}/labelStation/printers`, defaultId:`rooms/${k}/labelStation/defaultPrinterId`, jobs:`rooms/${k}/labelStation/jobs`, defaultSet:`rooms/${k}/labelStation/defaultSet` }; }
 
 function switchTopTab(name){
     document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
@@ -5724,7 +5769,7 @@ function _saveKey(raw){
     rpSubscribe(k);
 }
 
-function rpDetach(){ if(rpPrintersRef)rpPrintersRef.off(); if(rpDefaultRef)rpDefaultRef.off(); if(rpJobsRef)rpJobsRef.off(); rpPrintersRef=rpDefaultRef=rpJobsRef=null; }
+function rpDetach(){ if(rpPrintersRef)rpPrintersRef.off(); if(rpDefaultRef)rpDefaultRef.off(); if(rpJobsRef)rpJobsRef.off(); if(rpDefaultSetRef)rpDefaultSetRef.off(); rpPrintersRef=rpDefaultRef=rpJobsRef=rpDefaultSetRef=null; }
 
 function rpSubscribe(k){
     if(!rpReady) return;
@@ -5738,7 +5783,7 @@ function rpSubscribe(k){
     rpPrintersRef.on('value', snap=>{
         const v=snap.val();
         if (v==null){ // first use of this key — seed from the built-in list
-            rpPrinters=SEED_PRINTERS.map((x,i)=>({id:'p'+Date.now()+'_'+i, name:x.name, ip:x.ip, port:x.port}));
+            rpPrinters=rpDefaultPrinters();   // saved defaults if there are any, else the built-in list
             rpPushPrinters();
         } else {
             rpPrinters = Array.isArray(v) ? v.filter(Boolean) : Object.values(v);
@@ -5747,6 +5792,15 @@ function rpSubscribe(k){
     }, err=>console.warn('[RP] printers', err));
 
     rpDefaultRef.on('value', snap=>{ rpDefaultId=snap.val()||''; renderPrinterRows(); refreshPrinterSelects(); });
+
+    // Default set: newest wins, so saving defaults on one device reaches the others.
+    rpDefaultSetRef=rpDB.ref(p.defaultSet);
+    rpDefaultSetRef.on('value', snap=>{
+        const cloud=snap.val();
+        if(!cloud || !Array.isArray(cloud.printers)) return;
+        const local=rpLoadDefaultSet();
+        if(!local || (cloud.savedAt||0) > (local.savedAt||0)) rpStoreDefaultSet(cloud, false);
+    }, err=>console.warn('[RP] defaultSet', err));
 
     rpJobsRef.on('value', snap=>{
         const v=snap.val()||{};
@@ -5772,7 +5826,194 @@ function rpScheduleSave(){
 function rpEdit(i,f,v){ if(rpPrinters[i]){ rpPrinters[i][f]=v; rpScheduleSave(); if(f!=='name') refreshPrinterSelects(); } }
 function rpDeleteRow(i){ rpPrinters.splice(i,1); renderPrinterRows(); refreshPrinterSelects(); rpScheduleSave(); }
 function addPrinterRow(){ rpPrinters.push({id:'p'+Date.now()+'_'+Math.random().toString(36).slice(2,5),name:'New Printer',ip:'10.247.',port:'9100'}); renderPrinterRows(); rpScheduleSave(); }
-function seedPrintersFromDefaults(){ if(!confirm('Replace the current list with the built-in list?')) return; rpPrinters=SEED_PRINTERS.map((x,i)=>({id:'p'+Date.now()+'_'+i,name:x.name,ip:x.ip,port:x.port})); renderPrinterRows(); refreshPrinterSelects(); rpPushPrinters(); }
+/* ─────────────────────────────────────────────────────────────
+   DEFAULT SET
+   "Load Defaults" used to mean the hardcoded SEED_PRINTERS list.
+   Now it means: your saved set if you've made one, else SEED_PRINTERS.
+   The saved set captures the printer list AND the floor-map desk
+   names/IPs, is kept in localStorage, and mirrors to Firebase so a
+   fresh device on the same sync key inherits it.
+───────────────────────────────────────────────────────────── */
+function rpLoadDefaultSet(){
+    try {
+        const v = JSON.parse(localStorage.getItem(RP_LS.defaults) || 'null');
+        return (v && Array.isArray(v.printers)) ? v : null;
+    } catch(e){ return null; }
+}
+function rpStoreDefaultSet(set, push){
+    try { localStorage.setItem(RP_LS.defaults, JSON.stringify(set)); } catch(e){}
+    if (push){ const k=getSyncKey(); if(rpReady && k) rpDB.ref(rpPaths(k).defaultSet).set(set).catch(e=>console.warn(e)); }
+}
+function rpDefaultPrinters(){
+    const d = rpLoadDefaultSet();
+    const src = (d && d.printers.length) ? d.printers : SEED_PRINTERS;
+    return src.map((x,i)=>({ id:'p'+Date.now()+'_'+i, name:x.name, ip:x.ip, port:x.port||'9100' }));
+}
+function rpReadLSObj(key){
+    try { const v=JSON.parse(localStorage.getItem(key)||'{}'); return (v&&typeof v==='object')?v:{}; }
+    catch(e){ return {}; }
+}
+function rpSaveCurrentAsDefaults(){
+    if(!rpPrinters.length){ alert('No printers to save yet.'); return; }
+    const fmIps   = rpReadLSObj(FM_LS.ips);
+    const fmNames = rpReadLSObj(FM_LS.names);
+    const n = Object.keys(fmIps).length;
+    if(!confirm(`Save the current setup as your defaults?\n\n• ${rpPrinters.length} printers\n• ${n} floor-map desk IPs\n• ${Object.keys(fmNames).length} renamed desks\n\nThis is what "Load Defaults" will restore from now on, on every device using this sync key.`)) return;
+    const set = {
+        savedAt: Date.now(),
+        savedBy: rpDeviceName(),
+        printers: rpPrinters.map(p=>({ name:p.name, ip:p.ip, port:p.port||'9100' })),
+        floorMapIps: fmIps,
+        floorMapNames: fmNames,
+    };
+    rpStoreDefaultSet(set, true);
+    const st=document.getElementById('printerSaveStatus');
+    if(st){ st.textContent='⭐ Saved as defaults'; setTimeout(()=>st.textContent='',2500); }
+}
+function seedPrintersFromDefaults(){
+    const d = rpLoadDefaultSet();
+    const what = d ? `your saved defaults (${d.printers.length} printers, saved ${new Date(d.savedAt).toLocaleString()})`
+                   : `the built-in list (${SEED_PRINTERS.length} printers)`;
+    if(!confirm('Replace the current list with '+what+'?')) return;
+    rpPrinters = rpDefaultPrinters();
+    renderPrinterRows(); refreshPrinterSelects(); rpPushPrinters();
+    // Restore the floor map too, if the saved set carries one.
+    if(d && (d.floorMapIps || d.floorMapNames) && typeof window.fmApplyDefaults === 'function'){
+        window.fmApplyDefaults(d.floorMapIps||{}, d.floorMapNames||{});
+    }
+}
+/* ─────────────────────────────────────────────────────────────
+   BACKUP FILE (.json) — portable copy of the whole setup.
+   Printers are exported by name/ip/port, never by id: ids are
+   generated at seed time and mean nothing on another device, so
+   the default printer is remembered by NAME and re-matched on
+   import.
+───────────────────────────────────────────────────────────── */
+const RP_BACKUP_KIND = 'labelStation.backup';
+
+function rpBuildBackup(){
+    const def = rpPrinters.find(p=>p.id===rpDefaultId);
+    return {
+        kind: RP_BACKUP_KIND,
+        version: 1,
+        savedAt: Date.now(),
+        savedBy: rpDeviceName(),
+        syncKey: getSyncKey() || null,
+        printers: rpPrinters.map(p=>({ name:p.name, ip:p.ip, port:p.port||'9100' })),
+        defaultPrinterName: def ? def.name : null,
+        floorMapIps: rpReadLSObj(FM_LS.ips),
+        floorMapNames: rpReadLSObj(FM_LS.names),
+    };
+}
+
+function rpExportBackup(){
+    if(!rpPrinters.length && !Object.keys(rpReadLSObj(FM_LS.ips)).length){
+        alert('Nothing to export yet.'); return;
+    }
+    const data = rpBuildBackup();
+    const stamp = new Date().toISOString().slice(0,10);
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type:'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `label-station-${data.syncKey || 'local'}-${stamp}.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
+    const st=document.getElementById('printerSaveStatus');
+    if(st){ st.textContent='💾 Exported'; setTimeout(()=>st.textContent='',2500); }
+}
+
+function rpOpenImport(){
+    document.getElementById('rpImportText').value='';
+    rpImportMsg('');
+    document.getElementById('rpImportScrim').classList.add('open');
+}
+function rpCloseImport(){ document.getElementById('rpImportScrim').classList.remove('open'); }
+function rpImportMsg(msg, bad){
+    const el=document.getElementById('rpImportMsg'); if(!el) return;
+    el.textContent=msg||''; el.className='rp-imp-msg'+(bad?' bad':'');
+}
+
+function rpImportFilePicked(ev){
+    const f = ev.target.files && ev.target.files[0];
+    ev.target.value = '';                      // so re-picking the same file fires again
+    if(!f) return;
+    const rd = new FileReader();
+    rd.onload = () => {
+        document.getElementById('rpImportText').value = String(rd.result||'');
+        rpImportFromText();
+    };
+    rd.onerror = () => rpImportMsg('Could not read that file.', true);
+    rd.readAsText(f);
+}
+
+function rpImportFromText(){
+    const raw = (document.getElementById('rpImportText').value||'').trim();
+    if(!raw){ rpImportMsg('Paste some JSON, or pick a file.', true); return; }
+    let data;
+    try { data = JSON.parse(raw); }
+    catch(e){ rpImportMsg('Not valid JSON: '+e.message, true); return; }
+    rpApplyBackup(data);
+}
+
+function rpApplyBackup(data){
+    if(!data || typeof data !== 'object'){ rpImportMsg('That file has no setup in it.', true); return; }
+    // Accept a bare printers array too — easy to hand-write.
+    if(Array.isArray(data)) data = { printers:data };
+    if(!Array.isArray(data.printers) || !data.printers.length){
+        rpImportMsg('No printers found in that file.', true); return;
+    }
+    const clean = data.printers
+        .filter(p=>p && (p.ip||p.name))
+        .map(p=>({ name:String(p.name||p.ip||'Printer'), ip:String(p.ip||''), port:String(p.port||'9100') }));
+
+    const wantFM = document.getElementById('rpImportFloorMap').checked;
+    const fmIps   = (wantFM && data.floorMapIps   && typeof data.floorMapIps==='object')   ? data.floorMapIps   : null;
+    const fmNames = (wantFM && data.floorMapNames && typeof data.floorMapNames==='object') ? data.floorMapNames : null;
+
+    const bits = [`${clean.length} printers`];
+    if(fmIps)   bits.push(`${Object.keys(fmIps).length} desk IPs`);
+    if(fmNames) bits.push(`${Object.keys(fmNames).length} desk names`);
+    if(!confirm(`Import ${bits.join(', ')}?\n\nThis replaces the current list${(fmIps||fmNames)?' and floor map':''} on this device, and pushes it to the sync key if you're connected.`)) return;
+
+    rpPrinters = clean.map((p,i)=>({ id:'p'+Date.now()+'_'+i, name:p.name, ip:p.ip, port:p.port }));
+
+    // Re-match the default printer by name — ids don't survive the trip.
+    if(data.defaultPrinterName){
+        const hit = rpPrinters.find(p=>p.name===data.defaultPrinterName);
+        if(hit) rpDefaultId = hit.id;
+    }
+    renderPrinterRows(); refreshPrinterSelects(); rpPushPrinters();
+    if(rpDefaultId){ const k=getSyncKey(); if(rpReady&&k) rpDB.ref(rpPaths(k).defaultId).set(rpDefaultId); }
+
+    if((fmIps || fmNames) && typeof window.fmApplyDefaults === 'function'){
+        window.fmApplyDefaults(fmIps||{}, fmNames||{}, '📂 Floor map imported');
+    }
+
+    if(document.getElementById('rpImportAsDefaults').checked){
+        rpStoreDefaultSet({
+            savedAt: Date.now(),
+            savedBy: rpDeviceName(),
+            printers: clean,
+            floorMapIps: fmIps || rpReadLSObj(FM_LS.ips),
+            floorMapNames: fmNames || rpReadLSObj(FM_LS.names),
+        }, true);
+    }
+
+    rpImportMsg('✓ Imported '+bits.join(', '));
+    setTimeout(rpCloseImport, 1100);
+}
+
+function rpExportDefaultsCode(){
+    // Emits a SEED_PRINTERS literal you can paste into this file, making the
+    // current list the true built-in default even on a browser with no storage.
+    const d = rpLoadDefaultSet();
+    const list = (d && d.printers.length) ? d.printers : rpPrinters.map(p=>({name:p.name, ip:p.ip, port:p.port||'9100'}));
+    const body = list.map(p=>`    { "name": ${JSON.stringify(p.name)}, "ip": ${JSON.stringify(p.ip)}, "port": ${JSON.stringify(p.port||'9100')} }`).join(',\n');
+    const txt = `// Generated ${new Date().toISOString()} — replace the SEED_PRINTERS array in the label doc with this.\nconst SEED_PRINTERS = [\n${body}\n];\n`;
+    const blob=new Blob([txt],{type:'text/plain'});
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='SEED_PRINTERS.js';
+    a.click(); setTimeout(()=>URL.revokeObjectURL(a.href), 2000);
+}
 
 function renderPrinterRows(){
     const tb=document.getElementById('printerRows'); if(!tb) return;
@@ -6064,35 +6305,114 @@ const GRID_ROWS = [
 ];
 
 /* ─────────────────────────────────────────────────────────────
-   STORAGE — localStorage + Firebase (via rpDB if sync key set)
+   ACCESSIONS WING  (new room, separate from the main floor)
+   Three pods stacked top to bottom; each pod is a 2x2 of desks.
+   Rendered in its own container so the main GRID_ROWS layout is
+   untouched. Names here are placeholders — rename them in the
+   Edit IPs modal and the override is what shows from then on.
 ───────────────────────────────────────────────────────────── */
-const FM_KEY     = 'floormap_desk_ips_v1';
-const FM_FB_PATH = k => `rooms/${k}/labelStation/floorMapIps`;
+const WING_TITLE = 'Accessions Wing';
+const WING_PODS = [
+    ['aw_p1d1','aw_p1d2','aw_p1d3','aw_p1d4'],
+    ['aw_p2d1','aw_p2d2','aw_p2d3','aw_p2d4'],
+    ['aw_p3d1','aw_p3d2','aw_p3d3','aw_p3d4'],
+];
+WING_PODS.forEach((pod, pi) => pod.forEach((id, di) => {
+    DESKS[id] = 'Desk ' + (pi * 4 + di + 1);
+}));
 
-function fmLoad() {
-    try { return JSON.parse(localStorage.getItem(FM_KEY)||'{}'); } catch(e){ return {}; }
+/* ─────────────────────────────────────────────────────────────
+   STORAGE — localStorage + Firebase (via rpDB if sync key set)
+   IPs and name overrides are two separate stores, so renaming a
+   desk survives any later edit to the hardcoded DESKS block.
+───────────────────────────────────────────────────────────── */
+const FM_KEY      = 'floormap_desk_ips_v1';
+const FM_NAME_KEY = 'floormap_desk_names_v1';
+const FM_FB_PATH  = k => `rooms/${k}/labelStation/floorMapIps`;
+const FM_FB_NAMES = k => `rooms/${k}/labelStation/floorMapNames`;
+
+function fmReadLS(key) {
+    try { const v = JSON.parse(localStorage.getItem(key)||'{}'); return (v && typeof v === 'object') ? v : {}; }
+    catch(e){ return {}; }
 }
-function fmSave(ips) {
-    try { localStorage.setItem(FM_KEY, JSON.stringify(ips)); } catch(e){}
-    // Also push to Firebase if sync is ready
-    const k = (typeof getSyncKey === 'function') ? getSyncKey() : '';
-    if (k && typeof rpDB !== 'undefined' && rpDB) {
-        try { rpDB.ref(FM_FB_PATH(k)).set(ips).catch(()=>{}); } catch(e){}
-    }
-}
-function fmPullFirebase() {
+function fmLoad()      { return fmReadLS(FM_KEY); }
+function fmLoadNames() { return fmReadLS(FM_NAME_KEY); }
+
+function fmPush(path, obj) {
+    // Firebase mirror is optional — no sync key just means local-only.
     const k = (typeof getSyncKey === 'function') ? getSyncKey() : '';
     if (!k || typeof rpDB === 'undefined' || !rpDB) return;
-    try {
-        rpDB.ref(FM_FB_PATH(k)).once('value').then(snap => {
-            const v = snap.val();
-            if (v && typeof v === 'object') {
-                deskIps = v;
-                try { localStorage.setItem(FM_KEY, JSON.stringify(v)); } catch(e){}
-                renderMap();
-            }
-        }).catch(()=>{});
-    } catch(e){}
+    try { rpDB.ref(path(k)).set(obj).catch(()=>{}); } catch(e){}
+}
+/* Every local write stamps a time. Cloud writes carry the same stamp as
+   { v, at }, so on connect we can tell which side is actually newer instead
+   of letting whichever device opened the tab last overwrite the other. */
+const FM_STAMP_KEY = 'floormap_stamp_v1';
+function fmStamps(){ return fmReadLS(FM_STAMP_KEY); }
+function fmStamp(which, ts){
+    const s = fmStamps(); s[which] = ts;
+    try { localStorage.setItem(FM_STAMP_KEY, JSON.stringify(s)); } catch(e){}
+}
+function fmUnwrap(raw){
+    if (raw && typeof raw === 'object' && raw.v && typeof raw.v === 'object') {
+        return { v: raw.v, at: Number(raw.at) || 0 };
+    }
+    return { v: (raw && typeof raw === 'object') ? raw : {}, at: 0 };  // legacy unstamped payload
+}
+
+function fmWrite(which, lsKey, path, obj) {
+    const at = Date.now();
+    try { localStorage.setItem(lsKey, JSON.stringify(obj)); } catch(e){}
+    fmStamp(which, at);
+    fmPush(path, { v: obj, at });
+}
+function fmSave(ips)        { fmWrite('ips',   FM_KEY,      FM_FB_PATH,  ips); }
+function fmSaveNames(names) { fmWrite('names', FM_NAME_KEY, FM_FB_NAMES, names); }
+
+/* Two-way reconcile: pull when the cloud is newer, push when this device is.
+   That's what makes a second device show THIS machine's current settings —
+   including the case where you entered everything before setting a sync key,
+   which never pushed anything at all. */
+function fmSyncCloud() {
+    const k = (typeof getSyncKey === 'function') ? getSyncKey() : '';
+    if (!k || typeof rpDB === 'undefined' || !rpDB) return;
+    const stamps = fmStamps();
+
+    const reconcile = (which, lsKey, path, apply, localObj) => {
+        try {
+            rpDB.ref(path(k)).once('value').then(snap => {
+                const cloud     = fmUnwrap(snap.val());
+                const localAt   = Number(stamps[which]) || 0;
+                const localCount= Object.keys(localObj || {}).length;
+
+                if (cloud.at > localAt && Object.keys(cloud.v).length >= 0 && cloud.at !== 0) {
+                    apply(cloud.v);
+                    try { localStorage.setItem(lsKey, JSON.stringify(cloud.v)); } catch(e){}
+                    fmStamp(which, cloud.at);
+                    renderMap();
+                } else if (localCount && localAt >= cloud.at) {
+                    // This device is the fresher one — publish it.
+                    fmPush(path, { v: localObj, at: localAt || Date.now() });
+                } else if (!localCount && Object.keys(cloud.v).length) {
+                    // Nothing local at all (fresh device) — take the cloud copy.
+                    apply(cloud.v);
+                    try { localStorage.setItem(lsKey, JSON.stringify(cloud.v)); } catch(e){}
+                    fmStamp(which, cloud.at || Date.now());
+                    renderMap();
+                }
+            }).catch(()=>{});
+        } catch(e){}
+    };
+
+    reconcile('ips',   FM_KEY,      FM_FB_PATH,  v => { deskIps   = v; }, deskIps);
+    reconcile('names', FM_NAME_KEY, FM_FB_NAMES, v => { deskNames = v; }, deskNames);
+}
+const fmPullFirebase = fmSyncCloud;   // old call sites keep working
+
+/* The label a desk shows: user override first, then the hardcoded default. */
+function fmLabel(id) {
+    const n = String(deskNames[id] || '').trim();
+    return n || DESKS[id] || id;
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -6129,6 +6449,11 @@ panel.innerHTML = `
     padding: 6px 12px; border-radius: 8px; border: 1.5px solid #fca5a5;
     background: #fff; font-size: 12px; font-weight: 600; color: #b91c1c; cursor: pointer;
 }
+.fm-btn-sheet {
+    padding: 6px 12px; border-radius: 8px; border: 1.5px solid #93c5fd;
+    background: #fff; font-size: 12px; font-weight: 600; color: #1d4ed8; cursor: pointer;
+}
+.fm-btn-sheet:hover { background: #eff6ff; }
 .fm-port-wrap { display: flex; align-items: center; gap: 5px; color: #475569; font-size: 12px; }
 .fm-port-input { width: 64px; border: 1.5px solid #cbd5e1; border-radius: 6px; padding: 5px 7px; font-size: 12px; }
 .fm-hint { font-size: 11px; color: #64748b; margin: 0 0 12px; line-height: 1.5; }
@@ -6261,6 +6586,40 @@ panel.innerHTML = `
 .fm-nb-create:disabled { opacity: .5; cursor: not-allowed; }
 .fm-nb-status { font-size: 12px; min-height: 16px; color: #059669; font-weight: 600; }
 .fm-nb-err { color: #dc2626; }
+
+/* ── Accessions Wing (pods) ── */
+.fm-wing-head {
+    margin: 24px 0 9px; font-size: 14px; font-weight: 800; color: #0f172a;
+    display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+}
+.fm-wing-head small { font-weight: 600; color: #64748b; font-size: 11px; }
+#fm-wing { display: flex; flex-direction: column; gap: 12px; width: max-content; max-width: 100%; }
+.fm-pod {
+    border: 2px dashed #cbd5e1; border-radius: 10px;
+    padding: 7px 8px 9px; background: #f8fafc; width: max-content;
+}
+.fm-pod-tag {
+    font-size: 9.5px; font-weight: 800; letter-spacing: 1.2px;
+    text-transform: uppercase; color: #94a3b8; margin-bottom: 6px;
+}
+.fm-pod-grid { display: grid; grid-template-columns: repeat(2, 84px); gap: 6px; }
+
+/* Edit mode makes every desk tappable */
+.fm-cell.edit-mode { border-color: #f59e0b; background: #fffbeb; }
+.fm-cell.edit-mode.has-ip { border-color: #3b82f6; background: #eff6ff; }
+
+/* ── Desk editor modal ── */
+#fm-edit-modal {
+    display: none; position: fixed; inset: 0; z-index: 10000;
+    background: rgba(0,0,0,.5); align-items: center; justify-content: center;
+}
+#fm-edit-modal.open { display: flex; }
+.fm-ed-small {
+    padding: 7px 11px; border-radius: 8px; border: 1.5px solid #e2e8f0;
+    background: #fff; font-size: 12px; font-weight: 600; color: #64748b; cursor: pointer;
+}
+.fm-ed-small:hover { border-color: #cbd5e1; color: #475569; }
+.fm-ed-hint { color: #94a3b8 !important; font-weight: 500 !important; }
 </style>
 
 <div id="fm-toast"></div>
@@ -6271,15 +6630,48 @@ panel.innerHTML = `
     <button class="fm-mode-btn"     id="fm-mode-edit">✏️ Edit IPs</button>
     <button class="fm-mode-btn"     id="fm-mode-notebook">📓 Notebook</button>
     <div class="fm-port-wrap">Port: <input class="fm-port-input" id="fm-port" value="9100" type="number" min="1" max="65535"></div>
+    <button class="fm-btn-sheet"    id="fm-print-layout">📄 Printout</button>
     <button class="fm-btn-clear"    id="fm-clear-all">🗑 Clear</button>
 </div>
 <p class="fm-hint">
     <strong>Print:</strong> tap a desk to send your label to its printer.&nbsp;
-    <strong>Edit IPs:</strong> type an IP for each desk. Blue = assigned.&nbsp;
+    <strong>Edit IPs:</strong> tap a desk to set its name and IP. Blue = assigned.&nbsp;
     <strong>Notebook:</strong> tap any desk to create a notebook there (purple = notebook mode).
 </p>
 
 <div id="fm-canvas"><!-- rendered by JS --></div>
+
+<div class="fm-wing-head">
+    🧪 <span id="fm-wing-title">Accessions Wing</span>
+    <small>separate room · 3 pods, 2×2 desks each</small>
+</div>
+<div id="fm-wing"><!-- rendered by JS --></div>
+
+<!-- Desk editor modal (Edit IPs mode) -->
+<div id="fm-edit-modal">
+    <div class="fm-nb-sheet">
+        <h3>✏️ Edit desk</h3>
+        <div>
+            <label>Desk name</label>
+            <input class="fm-nb-inp" id="fm-ed-name" maxlength="40" placeholder="e.g. Accessions 1">
+        </div>
+        <div>
+            <label>Zebra IP</label>
+            <input class="fm-nb-inp" id="fm-ed-ip" placeholder="10.247.__.__" inputmode="decimal">
+        </div>
+        <div class="fm-nb-status fm-ed-hint" id="fm-ed-hint"></div>
+        <div class="fm-nb-foot" style="justify-content:space-between; align-items:center;">
+            <div style="display:flex; gap:6px;">
+                <button class="fm-ed-small" id="fm-ed-clearip">Clear IP</button>
+                <button class="fm-ed-small" id="fm-ed-resetname">Reset name</button>
+            </div>
+            <div style="display:flex; gap:8px;">
+                <button class="fm-nb-cancel" id="fm-ed-cancel">Cancel</button>
+                <button class="fm-nb-create" id="fm-ed-save">Save</button>
+            </div>
+        </div>
+    </div>
+</div>
 
 <!-- Notebook creation modal -->
 <div id="fm-nb-modal">
@@ -6317,6 +6709,7 @@ document.querySelector('.main-container').appendChild(panel);
 ───────────────────────────────────────────────────────────── */
 let fmMode = 'print';
 let deskIps = fmLoad();
+let deskNames = fmLoadNames();
 const fmTimers = {};
 
 /* ─────────────────────────────────────────────────────────────
@@ -6344,63 +6737,84 @@ function renderMap() {
                 return;
             }
 
-            const label = DESKS[cellId] || cellId;
-            const ip = deskIps[cellId] || '';
-            const isDash = label === '—';
-
-            const cell = document.createElement('div');
-            cell.className = 'fm-cell ' + (isDash ? 'dash' : 'named') + (ip ? ' has-ip' : '') + (fmMode === 'notebook' ? ' nb-mode' : '');
-            cell.dataset.id = cellId;
-
-            // Name
-            const nameEl = document.createElement('div');
-            nameEl.className = 'fm-name';
-            nameEl.textContent = label;
-            cell.appendChild(nameEl);
-
-            if (fmMode === 'edit') {
-                // IP input
-                const inp = document.createElement('input');
-                inp.className = 'fm-ip-inp';
-                inp.type = 'text';
-                inp.placeholder = '10.x.x.x';
-                inp.value = ip;
-                inp.addEventListener('pointerdown', e => e.stopPropagation()); // prevent cell click
-                inp.addEventListener('blur', () => {
-                    const v = inp.value.trim();
-                    if (v) deskIps[cellId] = v; else delete deskIps[cellId];
-                    fmSave(deskIps);
-                    renderMap();
-                });
-                inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); });
-                cell.appendChild(inp);
-            } else {
-                // IP badge
-                const badge = document.createElement('div');
-                badge.className = ip ? 'fm-ip' : 'fm-no-ip';
-                badge.textContent = ip || (isDash ? '' : 'no IP');
-                cell.appendChild(badge);
-
-                // Status line
-                const statusEl = document.createElement('div');
-                statusEl.className = 'fm-cell-status';
-                statusEl.id = 'fms-' + cellId;
-                cell.appendChild(statusEl);
-
-                if (fmMode === 'notebook') {
-                    cell.style.cursor = 'pointer';
-                    cell.title = 'Create a notebook for ' + label;
-                    cell.addEventListener('click', () => fmNewNotebook(cellId, label));
-                } else if (ip) {
-                    cell.addEventListener('click', () => fmPrint(cellId, ip, label, cell));
-                } else {
-                    cell.classList.add('no-ip-print');
-                    cell.title = 'No IP — switch to Edit IPs to assign one';
-                }
-            }
-
-            canvas.appendChild(cell);
+            canvas.appendChild(makeCell(cellId));
         });
+    });
+
+    renderWing();
+}
+
+/* One desk cell — shared by the main floor grid and the wing pods. */
+function makeCell(cellId) {
+    const label  = fmLabel(cellId);
+    const ip     = deskIps[cellId] || '';
+    const isDash = label === '—';
+
+    const cell = document.createElement('div');
+    cell.className = 'fm-cell ' + (isDash ? 'dash' : 'named')
+        + (ip ? ' has-ip' : '')
+        + (fmMode === 'notebook' ? ' nb-mode' : '')
+        + (fmMode === 'edit' ? ' edit-mode' : '');
+    cell.dataset.id = cellId;
+
+    const nameEl = document.createElement('div');
+    nameEl.className = 'fm-name';
+    nameEl.textContent = label;
+    cell.appendChild(nameEl);
+
+    const badge = document.createElement('div');
+    badge.className = ip ? 'fm-ip' : 'fm-no-ip';
+    // In edit mode even the unnamed "—" desks show their IP state, since
+    // that's the mode where you're deciding what goes where.
+    badge.textContent = ip || ((isDash && fmMode !== 'edit') ? '' : 'no IP');
+    cell.appendChild(badge);
+
+    const statusEl = document.createElement('div');
+    statusEl.className = 'fm-cell-status';
+    statusEl.id = 'fms-' + cellId;
+    cell.appendChild(statusEl);
+
+    if (fmMode === 'edit') {
+        cell.title = 'Tap to rename / set IP';
+        cell.addEventListener('click', () => fmOpenEdit(cellId));
+    } else if (fmMode === 'notebook') {
+        cell.style.cursor = 'pointer';
+        cell.title = 'Create a notebook for ' + label;
+        cell.addEventListener('click', () => fmNewNotebook(cellId, label));
+    } else if (ip) {
+        cell.addEventListener('click', () => fmPrint(cellId, ip, label, cell));
+    } else {
+        cell.classList.add('no-ip-print');
+        cell.title = 'No IP — switch to Edit IPs to assign one';
+    }
+
+    return cell;
+}
+
+/* The new accessions wing: three pods, each a 2x2 block of desks. */
+function renderWing() {
+    const host = document.getElementById('fm-wing');
+    if (!host) return;
+    host.innerHTML = '';
+
+    const titleEl = document.getElementById('fm-wing-title');
+    if (titleEl) titleEl.textContent = WING_TITLE;
+
+    WING_PODS.forEach((pod, pi) => {
+        const podEl = document.createElement('div');
+        podEl.className = 'fm-pod';
+
+        const tag = document.createElement('div');
+        tag.className = 'fm-pod-tag';
+        tag.textContent = 'Pod ' + (pi + 1);
+        podEl.appendChild(tag);
+
+        const gridEl = document.createElement('div');
+        gridEl.className = 'fm-pod-grid';
+        pod.forEach(id => gridEl.appendChild(makeCell(id)));
+        podEl.appendChild(gridEl);
+
+        host.appendChild(podEl);
     });
 }
 
@@ -6445,6 +6859,135 @@ function fmPrint(deskId, ip, label, cellEl) {
 }
 
 /* ─────────────────────────────────────────────────────────────
+   ONE-PAGE PRINTOUT
+   Renders the floor plan plus an A–Z list of every assigned IP into
+   a plain black-and-white document and scales it to fit a single
+   landscape sheet. No <script> in the generated page — the label doc
+   lives inside a script block itself, so emitting one would end it
+   early. We drive the new window from here instead.
+───────────────────────────────────────────────────────────── */
+const FM_PRINT_CSS = `
+  @page { size: letter landscape; margin: 0.4in; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; color:#000; background:#fff; }
+  #page { transform-origin: top left; }
+  .hd { display:flex; align-items:baseline; gap:10px; border-bottom:2px solid #000; padding-bottom:5px; margin-bottom:9px; }
+  .hd h1 { font-size:15px; margin:0; letter-spacing:.3px; }
+  .hd .meta { font-size:9.5px; color:#444; margin-left:auto; }
+  .cols { display:flex; gap:16px; align-items:flex-start; }
+  .plan { display:flex; gap:14px; align-items:flex-start; }
+  .grid { display:grid; grid-template-columns: repeat(3, 74px) 14px repeat(5, 74px); gap:4px; }
+  .c { border:1px solid #999; border-radius:4px; padding:3px 2px; min-height:34px;
+       display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; }
+  .c.has { border:1.6px solid #000; }
+  .c.gap, .sp { border:none; }
+  .n { font-size:8.4px; font-weight:700; line-height:1.1; word-break:break-word; }
+  .i { font-size:7.6px; font-family:ui-monospace,Consolas,monospace; margin-top:1px; }
+  .c.has .i { font-weight:700; }
+  .c:not(.has) .i { color:#999; }
+  .wing { display:flex; flex-direction:column; gap:7px; }
+  .wingttl { font-size:9.5px; font-weight:800; text-transform:uppercase; letter-spacing:.7px; margin-bottom:1px; }
+  .pod { border:1px dashed #666; border-radius:5px; padding:4px 5px 5px; }
+  .pt { font-size:7px; font-weight:800; letter-spacing:.7px; color:#555; margin-bottom:3px; }
+  .pg { display:grid; grid-template-columns: repeat(2, 74px); gap:4px; }
+  .ref { min-width:210px; }
+  .refttl { font-size:9.5px; font-weight:800; text-transform:uppercase; letter-spacing:.7px;
+            border-bottom:1px solid #000; padding-bottom:2px; margin-bottom:4px; }
+  .lr { display:flex; justify-content:space-between; gap:10px; font-size:8.6px;
+        padding:1.4px 0; border-bottom:1px dotted #ccc; }
+  .lr b { font-family:ui-monospace,Consolas,monospace; }
+  .none { font-size:9px; color:#666; font-style:italic; }
+`;
+
+function fmBuildPrintout() {
+    const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+    const key = ((typeof getSyncKey === 'function') ? getSyncKey() : '') || 'local only';
+
+    const cellHTML = (id) => {
+        if (id === null) return '<div class="c gap"></div>';
+        const ip = deskIps[id] || '';
+        return `<div class="c${ip ? ' has' : ''}"><div class="n">${esc(fmLabel(id))}</div><div class="i">${esc(ip || '—')}</div></div>`;
+    };
+
+    let main = '';
+    GRID_ROWS.forEach(row => row.forEach((id, ci) => {
+        main += (ci === 3) ? '<div class="sp"></div>' : cellHTML(id);
+    }));
+
+    const wing = WING_PODS.map((pod, pi) =>
+        `<div class="pod"><div class="pt">Pod ${pi + 1}</div><div class="pg">${pod.map(cellHTML).join('')}</div></div>`
+    ).join('');
+
+    const assigned = Object.keys(deskIps)
+        .filter(id => deskIps[id])
+        .map(id => ({ n: fmLabel(id), ip: deskIps[id] }))
+        .sort((a, b) => a.n.localeCompare(b.n, undefined, { numeric: true }));
+
+    const list = assigned.length
+        ? assigned.map(r => `<div class="lr"><span>${esc(r.n)}</span><b>${esc(r.ip)}</b></div>`).join('')
+        : '<div class="none">No IPs assigned yet.</div>';
+
+    return `<!DOCTYPE html><html><head><meta charset="utf-8">
+<title>Lab Floor Map — Zebra printers</title><style>${FM_PRINT_CSS}</style></head><body>
+<div id="page">
+  <div class="hd">
+    <h1>LAB FLOOR MAP — ZEBRA PRINTERS</h1>
+    <div class="meta">${esc(assigned.length)} printers mapped &nbsp;·&nbsp; sync key: ${esc(key)} &nbsp;·&nbsp; ${esc(new Date().toLocaleString())}</div>
+  </div>
+  <div class="cols">
+    <div class="plan">
+      <div class="grid">${main}</div>
+      <div class="wing"><div class="wingttl">${esc(WING_TITLE)}</div>${wing}</div>
+    </div>
+    <div class="ref">
+      <div class="refttl">All assigned IPs (${esc(assigned.length)})</div>
+      ${list}
+    </div>
+  </div>
+</div>
+</body></html>`;
+}
+
+function fmPrintLayout() {
+    const html = fmBuildPrintout();
+    let win = null;
+    try { win = window.open('', '_blank'); } catch(e) { win = null; }
+
+    if (!win) {
+        // Popup blocked (or no popups at all) — hand over a file instead.
+        try {
+            const blob = new Blob([html], { type: 'text/html' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = 'lab-floor-map.html';
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+            fmToast('📄 Popup blocked — saved the printout as a file');
+        } catch(e) { fmToast('❌ Could not build the printout'); }
+        return;
+    }
+
+    try { win.document.open(); win.document.write(html); win.document.close(); }
+    catch(e) { fmToast('❌ Could not build the printout'); return; }
+
+    const fit = () => {
+        try {
+            const page = win.document.getElementById('page');
+            // Letter landscape at 96dpi, less 0.4in margins each side.
+            const AVAIL_W = 979, AVAIL_H = 739;
+            const w = page ? page.scrollWidth : 0, h = page ? page.scrollHeight : 0;
+            if (page && w && h) {
+                const s = Math.min(1, AVAIL_W / w, AVAIL_H / h);
+                if (s < 1) page.style.transform = 'scale(' + s.toFixed(4) + ')';
+            }
+        } catch(e) {}
+        try { win.focus(); win.print(); } catch(e) {}
+    };
+    setTimeout(fit, 180);
+    fmToast('📄 Printout opened');
+}
+
+/* ─────────────────────────────────────────────────────────────
    TOAST
 ───────────────────────────────────────────────────────────── */
 let fmToastTimer;
@@ -6469,6 +7012,7 @@ function fmSetMode(m) {
 document.getElementById('fm-mode-print'   ).addEventListener('click', () => fmSetMode('print'));
 document.getElementById('fm-mode-edit'    ).addEventListener('click', () => fmSetMode('edit'));
 document.getElementById('fm-mode-notebook').addEventListener('click', () => fmSetMode('notebook'));
+document.getElementById('fm-print-layout').addEventListener('click', fmPrintLayout);
 document.getElementById('fm-clear-all').addEventListener('click', () => {
     if (!confirm('Clear all IP assignments from the floor map?')) return;
     deskIps = {}; fmSave(deskIps); renderMap();
@@ -6560,11 +7104,95 @@ document.getElementById('fm-nb-create').addEventListener('click', fmNbSubmit);
 document.getElementById('fm-nb-title' ).addEventListener('keydown', e => { if (e.key === 'Enter') fmNbSubmit(); if (e.key === 'Escape') fmNbClose(); });
 document.getElementById('fm-nb-modal' ).addEventListener('click', e => { if (e.target.id === 'fm-nb-modal') fmNbClose(); });
 
+/* ─────────────────────────────────────────────────────────────
+   DESK EDITOR (Edit IPs mode) — name + IP in one sheet
+───────────────────────────────────────────────────────────── */
+let fmEditId = null;
+
+function fmDefaultName(id) { return DESKS[id] || id; }
+
+function fmOpenEdit(cellId) {
+    fmEditId = cellId;
+    const nameEl = document.getElementById('fm-ed-name');
+    const ipEl   = document.getElementById('fm-ed-ip');
+    const hintEl = document.getElementById('fm-ed-hint');
+    if (!nameEl || !ipEl) return;
+
+    nameEl.value = fmLabel(cellId);
+    ipEl.value   = deskIps[cellId] || '';
+    hintEl.textContent = 'Default name: ' + fmDefaultName(cellId);
+
+    document.getElementById('fm-edit-modal').classList.add('open');
+    setTimeout(() => nameEl.focus(), 80);
+}
+
+function fmEditClose() {
+    document.getElementById('fm-edit-modal')?.classList.remove('open');
+    fmEditId = null;
+}
+
+function fmEditSave() {
+    if (!fmEditId) return;
+    const id   = fmEditId;
+    const name = (document.getElementById('fm-ed-name').value || '').trim();
+    const ip   = (document.getElementById('fm-ed-ip').value   || '').trim();
+
+    // Only store a name when it actually differs from the built-in default,
+    // so the override map stays small and Reset always works.
+    if (name && name !== fmDefaultName(id)) deskNames[id] = name;
+    else delete deskNames[id];
+
+    if (ip) deskIps[id] = ip; else delete deskIps[id];
+
+    fmSaveNames(deskNames);
+    fmSave(deskIps);
+    renderMap();
+    fmToast('✓ Saved ' + (name || fmDefaultName(id)));
+    fmEditClose();
+}
+
+document.getElementById('fm-ed-save'  ).addEventListener('click', fmEditSave);
+document.getElementById('fm-ed-cancel').addEventListener('click', fmEditClose);
+document.getElementById('fm-ed-clearip').addEventListener('click', () => {
+    const el = document.getElementById('fm-ed-ip'); el.value = ''; el.focus();
+});
+document.getElementById('fm-ed-resetname').addEventListener('click', () => {
+    if (!fmEditId) return;
+    const el = document.getElementById('fm-ed-name');
+    el.value = fmDefaultName(fmEditId); el.focus();
+});
+['fm-ed-name','fm-ed-ip'].forEach(id => {
+    document.getElementById(id).addEventListener('keydown', e => {
+        if (e.key === 'Enter')  fmEditSave();
+        if (e.key === 'Escape') fmEditClose();
+    });
+});
+document.getElementById('fm-edit-modal').addEventListener('click', e => {
+    if (e.target.id === 'fm-edit-modal') fmEditClose();
+});
+
+/* Restoring the floor map from a saved default set (called by Load Defaults). */
+window.fmApplyDefaults = function(ips, names, msg){
+    deskIps   = (ips   && typeof ips   === 'object') ? ips   : {};
+    deskNames = (names && typeof names === 'object') ? names : {};
+    fmSave(deskIps); fmSaveNames(deskNames);   // stamps now, so this device wins the next reconcile
+    renderMap();
+    fmToast(msg || '↺ Floor map restored from defaults');
+};
+
+/* Reconcile the moment a sync key is entered, so a device that's been working
+   offline publishes what it has instead of waiting for a tab switch. */
+const _fmOrigSaveKey = window._saveKey;
+window._saveKey = function(raw){
+    _fmOrigSaveKey && _fmOrigSaveKey(raw);
+    setTimeout(fmSyncCloud, 500);
+};
+
 /* Hook switchTopTab so the map renders fresh each time the tab opens */
 const _fmOrigSwitch = window.switchTopTab;
 window.switchTopTab = function(tab) {
     _fmOrigSwitch && _fmOrigSwitch(tab);
-    if (tab === 'floormap') { deskIps = fmLoad(); renderMap(); fmPullFirebase(); }
+    if (tab === 'floormap') { deskIps = fmLoad(); deskNames = fmLoadNames(); renderMap(); fmPullFirebase(); }
 };
 
 renderMap(); // initial render
