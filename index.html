@@ -5850,13 +5850,29 @@ function rpDefaultPrinters(){
     return src.map((x,i)=>({ id:'p'+Date.now()+'_'+i, name:x.name, ip:x.ip, port:x.port||'9100' }));
 }
 function rpReadLSObj(key){
-    try { const v=JSON.parse(localStorage.getItem(key)||'{}'); return (v&&typeof v==='object')?v:{}; }
+    try { const v=JSON.parse(localStorage.getItem(key)||'{}'); return rpUnwrap(v); }
     catch(e){ return {}; }
+}
+/* Same envelope-stripping as the floor map, for anything crossing this side. */
+function rpUnwrap(x, d){
+    if(!x || typeof x!=='object') return {};
+    if(x.v && typeof x.v==='object' && (d||0)<4) return rpUnwrap(x.v,(d||0)+1);
+    return x;
+}
+/* The live map beats storage: storage can lag, or hold a bad envelope. */
+function rpFloorMap(){
+    try {
+        if (typeof window.fmSnapshot === 'function'){
+            const s = window.fmSnapshot();
+            return { ips: rpUnwrap(s.ips), names: rpUnwrap(s.names) };
+        }
+    } catch(e){}
+    return { ips: rpReadLSObj(FM_LS.ips), names: rpReadLSObj(FM_LS.names) };
 }
 function rpSaveCurrentAsDefaults(){
     if(!rpPrinters.length){ alert('No printers to save yet.'); return; }
-    const fmIps   = rpReadLSObj(FM_LS.ips);
-    const fmNames = rpReadLSObj(FM_LS.names);
+    const fm = rpFloorMap();
+    const fmIps = fm.ips, fmNames = fm.names;
     const n = Object.keys(fmIps).length;
     if(!confirm(`Save the current setup as your defaults?\n\n• ${rpPrinters.length} printers\n• ${n} floor-map desk IPs\n• ${Object.keys(fmNames).length} renamed desks\n\nThis is what "Load Defaults" will restore from now on, on every device using this sync key.`)) return;
     const set = {
@@ -5878,9 +5894,10 @@ function seedPrintersFromDefaults(){
     rpPrinters = rpDefaultPrinters();
     renderPrinterRows(); refreshPrinterSelects(); rpPushPrinters();
     // Restore the floor map too, if the saved set carries one.
-    if(d && (d.floorMapIps || d.floorMapNames) && typeof window.fmApplyDefaults === 'function'){
-        window.fmApplyDefaults(d.floorMapIps||{}, d.floorMapNames||{});
-    }
+    const dIps = d ? rpUnwrap(d.floorMapIps) : {}, dNames = d ? rpUnwrap(d.floorMapNames) : {};
+    if(Object.keys(dIps).length || Object.keys(dNames).length){
+        if(typeof window.fmApplyDefaults === 'function') window.fmApplyDefaults(dIps, dNames);
+    }   // a set with no floor map leaves the current one untouched
 }
 /* ─────────────────────────────────────────────────────────────
    BACKUP FILE (.json) — portable copy of the whole setup.
@@ -5901,8 +5918,8 @@ function rpBuildBackup(){
         syncKey: getSyncKey() || null,
         printers: rpPrinters.map(p=>({ name:p.name, ip:p.ip, port:p.port||'9100' })),
         defaultPrinterName: def ? def.name : null,
-        floorMapIps: rpReadLSObj(FM_LS.ips),
-        floorMapNames: rpReadLSObj(FM_LS.names),
+        floorMapIps: rpFloorMap().ips,
+        floorMapNames: rpFloorMap().names,
     };
 }
 
@@ -5967,8 +5984,11 @@ function rpApplyBackup(data){
         .map(p=>({ name:String(p.name||p.ip||'Printer'), ip:String(p.ip||''), port:String(p.port||'9100') }));
 
     const wantFM = document.getElementById('rpImportFloorMap').checked;
-    const fmIps   = (wantFM && data.floorMapIps   && typeof data.floorMapIps==='object')   ? data.floorMapIps   : null;
-    const fmNames = (wantFM && data.floorMapNames && typeof data.floorMapNames==='object') ? data.floorMapNames : null;
+    // Older files stored these wrapped as { v, at } — take either shape.
+    const rawIps   = wantFM ? rpUnwrap(data.floorMapIps)   : {};
+    const rawNames = wantFM ? rpUnwrap(data.floorMapNames) : {};
+    const fmIps   = Object.keys(rawIps).length   ? rawIps   : null;
+    const fmNames = Object.keys(rawNames).length ? rawNames : null;
 
     const bits = [`${clean.length} printers`];
     if(fmIps)   bits.push(`${Object.keys(fmIps).length} desk IPs`);
@@ -5990,12 +6010,13 @@ function rpApplyBackup(data){
     }
 
     if(document.getElementById('rpImportAsDefaults').checked){
+        const cur = rpFloorMap();
         rpStoreDefaultSet({
             savedAt: Date.now(),
             savedBy: rpDeviceName(),
             printers: clean,
-            floorMapIps: fmIps || rpReadLSObj(FM_LS.ips),
-            floorMapNames: fmNames || rpReadLSObj(FM_LS.names),
+            floorMapIps: fmIps || cur.ips,
+            floorMapNames: fmNames || cur.names,
         }, true);
     }
 
@@ -6335,8 +6356,34 @@ function fmReadLS(key) {
     try { const v = JSON.parse(localStorage.getItem(key)||'{}'); return (v && typeof v === 'object') ? v : {}; }
     catch(e){ return {}; }
 }
-function fmLoad()      { return fmReadLS(FM_KEY); }
-function fmLoadNames() { return fmReadLS(FM_NAME_KEY); }
+/* A desk table is a flat { deskId: "10.x.x.x" } map. Cloud payloads wrap it as
+   { v, at }. If a wrapped envelope ever reaches code expecting the flat map,
+   every lookup misses and the map renders empty — which is exactly how a
+   populated floor map can get silently wiped. So unwrap at EVERY entry point:
+   storage reads, cloud reads, defaults, imports. Handles double-wrapping too. */
+function fmUnwrapAny(x, depth) {
+    if (!x || typeof x !== 'object') return {};
+    if (x.v && typeof x.v === 'object' && (depth||0) < 4) return fmUnwrapAny(x.v, (depth||0)+1);
+    return x;
+}
+function fmIsWrapped(x){ return !!(x && typeof x === 'object' && x.v && typeof x.v === 'object'); }
+function fmCount(o){ return Object.keys(o||{}).length; }
+
+/* Reading also self-heals: if storage holds an envelope from an older build,
+   rewrite it flat so the damage doesn't propagate on the next save. */
+function fmLoadTable(key) {
+    const raw = fmReadLS(key);
+    if (!fmIsWrapped(raw)) return raw;
+    const flat = fmUnwrapAny(raw);
+    try { localStorage.setItem(key, JSON.stringify(flat)); } catch(e){}
+    console.warn('[FM] unwrapped a stored envelope for', key, '—', fmCount(flat), 'entries recovered');
+    return flat;
+}
+function fmLoad()      { return fmLoadTable(FM_KEY); }
+function fmLoadNames() { return fmLoadTable(FM_NAME_KEY); }
+
+/* Snapshot of what's actually on screen — the truth for exports/defaults. */
+window.fmSnapshot = function(){ return { ips: deskIps || {}, names: deskNames || {} }; };
 
 function fmPush(path, obj) {
     // Firebase mirror is optional — no sync key just means local-only.
@@ -6360,11 +6407,30 @@ function fmUnwrap(raw){
     return { v: (raw && typeof raw === 'object') ? raw : {}, at: 0 };  // legacy unstamped payload
 }
 
+const FM_PREV = { ips:'floormap_desk_ips_prev_v1', names:'floormap_desk_names_prev_v1' };
+
 function fmWrite(which, lsKey, path, obj) {
+    obj = fmUnwrapAny(obj);                     // never store an envelope
     const at = Date.now();
+    const prev = fmReadLS(lsKey);
+    // Keep one generation back so a bad restore is recoverable.
+    if (fmCount(prev) && fmCount(prev) !== fmCount(obj)) {
+        try { localStorage.setItem(FM_PREV[which], JSON.stringify(prev)); } catch(e){}
+    }
     try { localStorage.setItem(lsKey, JSON.stringify(obj)); } catch(e){}
     fmStamp(which, at);
     fmPush(path, { v: obj, at });
+}
+
+/* Undo the last destructive change to the map (restore, import, clear). */
+function fmUndoLast(){
+    const pIps = fmReadLS(FM_PREV.ips), pNames = fmReadLS(FM_PREV.names);
+    if (!fmCount(pIps) && !fmCount(pNames)) { fmToast('Nothing to undo'); return; }
+    if (!confirm(`Restore the previous floor map?\n\n• ${fmCount(pIps)} desk IPs\n• ${fmCount(pNames)} desk names`)) return;
+    if (fmCount(pIps))   { deskIps   = pIps;   fmSave(deskIps); }
+    if (fmCount(pNames)) { deskNames = pNames; fmSaveNames(deskNames); }
+    renderMap();
+    fmToast('↩ Previous floor map restored');
 }
 function fmSave(ips)        { fmWrite('ips',   FM_KEY,      FM_FB_PATH,  ips); }
 function fmSaveNames(names) { fmWrite('names', FM_NAME_KEY, FM_FB_NAMES, names); }
@@ -6385,7 +6451,14 @@ function fmSyncCloud() {
                 const localAt   = Number(stamps[which]) || 0;
                 const localCount= Object.keys(localObj || {}).length;
 
-                if (cloud.at > localAt && Object.keys(cloud.v).length >= 0 && cloud.at !== 0) {
+                const cloudCount = fmCount(cloud.v);
+                // Guard: newer-but-empty is almost always a wipe propagating.
+                // Refuse it and republish what this device still has.
+                if (cloud.at > localAt && !cloudCount && localCount) {
+                    console.warn('[FM] ignoring an empty cloud copy of', which, '— republishing', localCount, 'local entries');
+                    fmPush(path, { v: localObj, at: Date.now() });
+                    fmStamp(which, Date.now());
+                } else if (cloud.at > localAt && cloud.at !== 0) {
                     apply(cloud.v);
                     try { localStorage.setItem(lsKey, JSON.stringify(cloud.v)); } catch(e){}
                     fmStamp(which, cloud.at);
@@ -6631,6 +6704,7 @@ panel.innerHTML = `
     <button class="fm-mode-btn"     id="fm-mode-notebook">📓 Notebook</button>
     <div class="fm-port-wrap">Port: <input class="fm-port-input" id="fm-port" value="9100" type="number" min="1" max="65535"></div>
     <button class="fm-btn-sheet"    id="fm-print-layout">📄 Printout</button>
+    <button class="fm-btn-sheet"    id="fm-undo" title="Restore the map as it was before the last restore/import/clear">↩ Undo</button>
     <button class="fm-btn-clear"    id="fm-clear-all">🗑 Clear</button>
 </div>
 <p class="fm-hint">
@@ -7013,8 +7087,9 @@ document.getElementById('fm-mode-print'   ).addEventListener('click', () => fmSe
 document.getElementById('fm-mode-edit'    ).addEventListener('click', () => fmSetMode('edit'));
 document.getElementById('fm-mode-notebook').addEventListener('click', () => fmSetMode('notebook'));
 document.getElementById('fm-print-layout').addEventListener('click', fmPrintLayout);
+document.getElementById('fm-undo').addEventListener('click', fmUndoLast);
 document.getElementById('fm-clear-all').addEventListener('click', () => {
-    if (!confirm('Clear all IP assignments from the floor map?')) return;
+    if (!confirm(`Clear all ${Object.keys(deskIps).length} IP assignments from the floor map?\n\n(↩ Undo can bring them back.)`)) return;
     deskIps = {}; fmSave(deskIps); renderMap();
 });
 
@@ -7173,11 +7248,22 @@ document.getElementById('fm-edit-modal').addEventListener('click', e => {
 
 /* Restoring the floor map from a saved default set (called by Load Defaults). */
 window.fmApplyDefaults = function(ips, names, msg){
-    deskIps   = (ips   && typeof ips   === 'object') ? ips   : {};
-    deskNames = (names && typeof names === 'object') ? names : {};
+    const nextIps   = fmUnwrapAny(ips);
+    const nextNames = fmUnwrapAny(names);
+
+    // Refuse to trade a populated map for an empty one without being asked.
+    if (!fmCount(nextIps) && fmCount(deskIps)) {
+        if (!confirm(`That set has no desk IPs in it, but this device has ${fmCount(deskIps)}.\n\nWipe the current floor map anyway?`)) {
+            fmToast('Floor map left alone');
+            return false;
+        }
+    }
+    deskIps   = nextIps;
+    deskNames = nextNames;
     fmSave(deskIps); fmSaveNames(deskNames);   // stamps now, so this device wins the next reconcile
     renderMap();
     fmToast(msg || '↺ Floor map restored from defaults');
+    return true;
 };
 
 /* Reconcile the moment a sync key is entered, so a device that's been working
