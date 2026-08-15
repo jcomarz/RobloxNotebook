@@ -2055,6 +2055,13 @@ postHost({ type:'bw:ready' });
     <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.js"><\/script>
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"><\/script>
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"><\/script>
+    <script>
+    if (typeof firebase === 'undefined') {
+        var FB_FB = 'https://cdnjs.cloudflare.com/ajax/libs/firebase/9.23.0/';
+        document.write('<script src="' + FB_FB + 'firebase-app-compat.js"><' + '/script>');
+        document.write('<script src="' + FB_FB + 'firebase-database-compat.js"><' + '/script>');
+    }
+    <\/script>
     <style>
         * {
             margin: 0;
@@ -6257,16 +6264,13 @@ const DESKS = {
     // Bottom
     jillian:   'Jillian',
     jayla:     'Jayla',
-    // Floaters
-    andrew:    'Andrew',
-    kimeal:    'Kimeal',
 };
 
 /* ─────────────────────────────────────────────────────────────
    GRID LAYOUT
    Mirrors the screenshot exactly as a 2D grid.
    The whole floor is a CSS grid with two "column zones":
-     • LEFT (cols 1-3):  Left Island, Floaters
+     • LEFT (cols 1-3):  Left Island
      • RIGHT (cols 5-9): Top row + all clusters
    A gap column (col 4) separates them spatially.
 
@@ -6321,8 +6325,6 @@ const GRID_ROWS = [
     // ── Bottom ───────────────────────────────────────────────────────────────────
     [   null,    null,    null,    null,   null,      'jillian', 'jayla',   null,    null       ],
 
-    // ── Floaters (left side, below island) ───────────────────────────────────────
-    [   'andrew','kimeal', null,   null,   null,      null,      null,      null,    null       ],
 ];
 
 /* ─────────────────────────────────────────────────────────────
@@ -6782,8 +6784,25 @@ document.querySelector('.main-container').appendChild(panel);
    STATE
 ───────────────────────────────────────────────────────────── */
 let fmMode = 'print';
+/* Desks removed from the layout. Their stored IPs/names would otherwise sit in
+   storage forever, get carried into backups, and inflate the printout count. */
+const FM_RETIRED = ['andrew', 'kimeal'];
+function fmPurgeRetired(){
+    let hit = false;
+    FM_RETIRED.forEach(id => {
+        if (id in deskIps)   { delete deskIps[id];   hit = true; }
+        if (id in deskNames) { delete deskNames[id]; hit = true; }
+    });
+    if (hit) {
+        try { localStorage.setItem(FM_KEY, JSON.stringify(deskIps)); } catch(e){}
+        try { localStorage.setItem(FM_NAME_KEY, JSON.stringify(deskNames)); } catch(e){}
+        console.warn('[FM] dropped data for retired desks:', FM_RETIRED.join(', '));
+    }
+}
+
 let deskIps = fmLoad();
 let deskNames = fmLoadNames();
+fmPurgeRetired();
 const fmTimers = {};
 
 /* ─────────────────────────────────────────────────────────────
@@ -6940,17 +6959,23 @@ function fmPrint(deskId, ip, label, cellEl) {
    lives inside a script block itself, so emitting one would end it
    early. We drive the new window from here instead.
 ───────────────────────────────────────────────────────────── */
+/* Grid cells that exist in the layout but not in the room. Add ids here to
+   drop them from the printout while keeping them on screen. */
+const FM_PRINT_HIDE = [];
+
 const FM_PRINT_CSS = `
   @page { size: letter landscape; margin: 0.4in; }
   * { box-sizing: border-box; }
   body { margin:0; font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; color:#000; background:#fff; }
-  #page { transform-origin: top left; }
+  /* inline-block so scrollWidth is the CONTENT width, not the window width —
+     without this the scale factor is computed against the viewport and the
+     plan can never grow to fill the sheet. */
+  #page { transform-origin: top left; display: inline-block; }
   .hd { display:flex; align-items:baseline; gap:10px; border-bottom:2px solid #000; padding-bottom:5px; margin-bottom:9px; }
   .hd h1 { font-size:15px; margin:0; letter-spacing:.3px; }
   .hd .meta { font-size:9.5px; color:#444; margin-left:auto; }
-  .cols { display:flex; gap:16px; align-items:flex-start; }
-  .plan { display:flex; gap:14px; align-items:flex-start; }
-  .grid { display:grid; grid-template-columns: repeat(3, 74px) 14px repeat(5, 74px); gap:4px; }
+  .plan { display:flex; gap:22px; align-items:flex-start; }
+  .grid { display:grid; grid-template-columns: repeat(3, 84px) 16px repeat(5, 84px); gap:5px; }
   .c { border:1px solid #999; border-radius:4px; padding:3px 2px; min-height:34px;
        display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; }
   .c.has { border:1.6px solid #000; }
@@ -6963,14 +6988,7 @@ const FM_PRINT_CSS = `
   .wingttl { font-size:9.5px; font-weight:800; text-transform:uppercase; letter-spacing:.7px; margin-bottom:1px; }
   .pod { border:1px dashed #666; border-radius:5px; padding:4px 5px 5px; }
   .pt { font-size:7px; font-weight:800; letter-spacing:.7px; color:#555; margin-bottom:3px; }
-  .pg { display:grid; grid-template-columns: repeat(2, 74px); gap:4px; }
-  .ref { min-width:210px; }
-  .refttl { font-size:9.5px; font-weight:800; text-transform:uppercase; letter-spacing:.7px;
-            border-bottom:1px solid #000; padding-bottom:2px; margin-bottom:4px; }
-  .lr { display:flex; justify-content:space-between; gap:10px; font-size:8.6px;
-        padding:1.4px 0; border-bottom:1px dotted #ccc; }
-  .lr b { font-family:ui-monospace,Consolas,monospace; }
-  .none { font-size:9px; color:#666; font-style:italic; }
+  .pg { display:grid; grid-template-columns: repeat(2, 84px); gap:5px; }
 `;
 
 function fmBuildPrintout() {
@@ -6983,40 +7001,36 @@ function fmBuildPrintout() {
         return `<div class="c${ip ? ' has' : ''}"><div class="n">${esc(fmLabel(id))}</div><div class="i">${esc(ip || '—')}</div></div>`;
     };
 
+    // Desks that exist in the app's grid but not in the physical room.
+    // Hidden from the printout only — they stay tappable on screen.
+    const HIDE = FM_PRINT_HIDE;
     let main = '';
-    GRID_ROWS.forEach(row => row.forEach((id, ci) => {
-        main += (ci === 3) ? '<div class="sp"></div>' : cellHTML(id);
-    }));
+    GRID_ROWS.forEach(row => {
+        // A row of nothing but gaps would print as a band of white space.
+        const hasContent = row.some((id, ci) => ci !== 3 && id !== null && HIDE.indexOf(id) === -1);
+        if (!hasContent) return;
+        row.forEach((id, ci) => {
+            if (ci === 3) { main += '<div class="sp"></div>'; return; }
+            main += (id !== null && HIDE.indexOf(id) !== -1) ? '<div class="c gap"></div>' : cellHTML(id);
+        });
+    });
 
     const wing = WING_PODS.map((pod, pi) =>
         `<div class="pod"><div class="pt">Pod ${pi + 1}</div><div class="pg">${pod.map(cellHTML).join('')}</div></div>`
     ).join('');
 
-    const assigned = Object.keys(deskIps)
-        .filter(id => deskIps[id])
-        .map(id => ({ n: fmLabel(id), ip: deskIps[id] }))
-        .sort((a, b) => a.n.localeCompare(b.n, undefined, { numeric: true }));
-
-    const list = assigned.length
-        ? assigned.map(r => `<div class="lr"><span>${esc(r.n)}</span><b>${esc(r.ip)}</b></div>`).join('')
-        : '<div class="none">No IPs assigned yet.</div>';
+    const assignedCount = Object.keys(deskIps).filter(id => deskIps[id] && HIDE.indexOf(id) === -1).length;
 
     return `<!DOCTYPE html><html><head><meta charset="utf-8">
 <title>Lab Floor Map — Zebra printers</title><style>${FM_PRINT_CSS}</style></head><body>
 <div id="page">
   <div class="hd">
     <h1>LAB FLOOR MAP — ZEBRA PRINTERS</h1>
-    <div class="meta">${esc(assigned.length)} printers mapped &nbsp;·&nbsp; sync key: ${esc(key)} &nbsp;·&nbsp; ${esc(new Date().toLocaleString())}</div>
+    <div class="meta">${esc(assignedCount)} printers mapped &nbsp;·&nbsp; sync key: ${esc(key)} &nbsp;·&nbsp; ${esc(new Date().toLocaleString())}</div>
   </div>
-  <div class="cols">
-    <div class="plan">
-      <div class="grid">${main}</div>
-      <div class="wing"><div class="wingttl">${esc(WING_TITLE)}</div>${wing}</div>
-    </div>
-    <div class="ref">
-      <div class="refttl">All assigned IPs (${esc(assigned.length)})</div>
-      ${list}
-    </div>
+  <div class="plan">
+    <div class="grid">${main}</div>
+    <div class="wing"><div class="wingttl">${esc(WING_TITLE)}</div>${wing}</div>
   </div>
 </div>
 </body></html>`;
@@ -7051,8 +7065,10 @@ function fmPrintLayout() {
             const AVAIL_W = 979, AVAIL_H = 739;
             const w = page ? page.scrollWidth : 0, h = page ? page.scrollHeight : 0;
             if (page && w && h) {
-                const s = Math.min(1, AVAIL_W / w, AVAIL_H / h);
-                if (s < 1) page.style.transform = 'scale(' + s.toFixed(4) + ')';
+                // Grow to fill the sheet, not just shrink to fit it. Capped so a
+                // nearly-empty map doesn't blow up into four giant boxes.
+                const s = Math.min(AVAIL_W / w, AVAIL_H / h, 3.5);
+                if (Math.abs(s - 1) > 0.01) page.style.transform = 'scale(' + s.toFixed(4) + ')';
             }
         } catch(e) {}
         try { win.focus(); win.print(); } catch(e) {}
@@ -7298,6 +7314,17 @@ try { rpInit(); } catch(e){ console.error('[RP] startup', e); }
 <!-- Firebase v9 compat (matches Persona City) -->
 <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-database-compat.js"></script>
+<script>
+// Plenty of corporate networks and blockers allow cdnjs but not gstatic. If the
+// primary CDN didn't deliver, pull the same compat build from the mirror that
+// already serves this page's other libraries. document.write keeps it
+// parser-synchronous, so the app script below still sees `firebase` defined.
+if (typeof firebase === 'undefined') {
+    var FB_FALLBACK = 'https://cdnjs.cloudflare.com/ajax/libs/firebase/9.23.0/';
+    document.write('<script src="' + FB_FALLBACK + 'firebase-app-compat.js"><' + '/script>');
+    document.write('<script src="' + FB_FALLBACK + 'firebase-database-compat.js"><' + '/script>');
+}
+</script>
 
 <script>
 // ─── Firebase setup (matches Persona City config) ────────────────────
@@ -7316,9 +7343,11 @@ if (typeof firebase === 'undefined') {
             '<h1>📓 Lab Notebook</h1>' +
             '<p class="hint" style="color:#fca5a5; line-height:1.6;">' +
             'Couldn\'t load the Firebase SDK from <b>gstatic.com</b>, so the app can\'t start.<br><br>' +
+            'Both <b>gstatic.com</b> and the <b>cdnjs.cloudflare.com</b> fallback failed.<br><br>' +
             'Most common causes:<br>' +
+            '• Opening this file straight from disk (<b>file://</b>) — put it on GitHub Pages or a local server instead.<br>' +
             '• A content/ad blocker (uBlock Origin, Brave Shields, Firefox strict tracking) — allow ' +
-            '<b>www.gstatic.com</b> and <b>*.firebaseio.com</b> for this site, then reload.<br>' +
+            '<b>www.gstatic.com</b>, <b>cdnjs.cloudflare.com</b> and <b>*.firebaseio.com</b> for this site, then reload.<br>' +
             '• No network connection.<br>' +
             '• You\'re viewing this inside an in-app preview/sandbox — open the real GitHub Pages URL instead.' +
             '</p>';
