@@ -256,6 +256,42 @@
   }
   .tree-badge { background: #b8553a; color: #fff; }
 
+  /* Dragons tab */
+  .dragon-add { padding: 12px 14px; border-bottom: 1px solid var(--border); background: var(--panel); }
+  .dragon-add textarea {
+    width: 100%; padding: 10px; border-radius: 8px; resize: vertical;
+    background: var(--bg); color: var(--text); border: 1px solid var(--border);
+    font-size: 14px; font-family: inherit;
+  }
+  .dragon-add button {
+    margin-top: 8px; width: 100%; padding: 11px; border: none; border-radius: 8px;
+    background: #dc2626; color: #fff; font-weight: bold; font-size: 14px; cursor: pointer;
+  }
+  .dragon-hint { font-size: 11px; color: var(--muted); margin-top: 8px; line-height: 1.5; }
+  .dragon-head {
+    display: flex; align-items: center; gap: 6px;
+    padding: 12px 14px 6px; font-size: 12px; font-weight: 700; color: #fca5a5;
+    text-transform: uppercase; letter-spacing: .5px;
+  }
+  .dragon-head span { color: var(--muted); }
+  .dragon-clear {
+    margin-left: auto; background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; font-size: 11px; cursor: pointer;
+  }
+  .dragon-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 11px 14px; border-bottom: 1px solid var(--border);
+  }
+  .dragon-item.slain { opacity: .55; }
+  .dragon-item.slain .dragon-label { text-decoration: line-through; }
+  .dragon-ico { font-size: 18px; }
+  .dragon-text { flex: 1; font-size: 14px; word-break: break-word; }
+  .dragon-when { display: block; font-size: 11px; color: var(--muted); }
+  .dragon-del {
+    background: transparent; border: 1px solid var(--border); color: var(--muted);
+    border-radius: 6px; width: 30px; height: 30px; cursor: pointer;
+  }
+
   /* Decision-tree builder overlay */
   #tree-builder {
     display: none;
@@ -345,6 +381,7 @@
   <div class="topbar" id="topbar-editor" style="display:none;">
     <button class="icon-btn" id="btn-back">←</button>
     <input class="editor-title" id="editor-title" placeholder="Untitled">
+    <button class="icon-btn" id="btn-dragons" title="Turn lines into Persona City dragons">🐉</button>
     <button class="icon-btn danger" id="btn-delete" title="Delete">🗑</button>
   </div>
   
@@ -354,6 +391,7 @@
     <button class="tab" data-tab="notebooks">📓 Notebooks</button>
     <button class="tab" data-tab="trees">🌳 Trees</button>
     <button class="tab" data-tab="labels">🏷️ Labels</button>
+    <button class="tab" data-tab="dragons">🐉 Dragons</button>
   </div>
   
   <!-- SOPs list -->
@@ -368,6 +406,11 @@
 
   <!-- Decision trees list -->
   <div class="list-view" id="view-trees" style="display:none;">
+    <div class="empty">Loading…</div>
+  </div>
+
+  <!-- TODO dragons shared with Persona City -->
+  <div class="list-view" id="view-dragons" style="display:none;">
     <div class="empty">Loading…</div>
   </div>
 
@@ -2055,13 +2098,6 @@ postHost({ type:'bw:ready' });
     <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.js"><\/script>
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"><\/script>
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"><\/script>
-    <script>
-    if (typeof firebase === 'undefined') {
-        var FB_FB = 'https://cdnjs.cloudflare.com/ajax/libs/firebase/9.23.0/';
-        document.write('<script src="' + FB_FB + 'firebase-app-compat.js"><' + '/script>');
-        document.write('<script src="' + FB_FB + 'firebase-database-compat.js"><' + '/script>');
-    }
-    <\/script>
     <style>
         * {
             margin: 0;
@@ -2171,6 +2207,10 @@ postHost({ type:'bw:ready' });
             margin-bottom: 15px;
             color: #374151;
         }
+
+        #labelDesigner .sticker-only { display: none; }
+        #labelDesigner.sticker-mode .sticker-only { display: block; }
+        #labelDesigner.sticker-mode .flag-only { display: none !important; }
 
         .label-preview {
             background: linear-gradient(135deg, #c8c8c8 0%, #b0b0b0 100%);
@@ -2890,12 +2930,125 @@ postHost({ type:'bw:ready' });
                 <h1>Zebra ZT410 Label Designer</h1>
             </div>
 
+            <!-- ===== LAYOUT SWITCH: FLAG LABEL vs BARCODE STICKER ===== -->
             <div class="form-group">
+                <label>Label Layout</label>
+                <div style="display:flex; gap:16px; flex-wrap:wrap;">
+                    <label style="display:flex; align-items:center; gap:8px; font-weight:normal; cursor:pointer;">
+                        <input type="radio" name="labelLayout" value="flag" checked onchange="bcsSetLayout(this.value)">
+                        <span>🏳️ Flag label (text / image / tracking barcode)</span>
+                    </label>
+                    <label style="display:flex; align-items:center; gap:8px; font-weight:normal; cursor:pointer;">
+                        <input type="radio" name="labelLayout" value="sticker" onchange="bcsSetLayout(this.value)">
+                        <span>🏷️ Sticker (one line → QR or barcode + text)</span>
+                    </label>
+                </div>
+            </div>
+
+            <div id="bcsPanel" class="qr-section sticker-only" style="background:#eef2ff; border:2px solid #6366f1;">
+                <h3 style="margin-bottom:12px; color:#3730a3;">🏷️ Sticker</h3>
+                <div class="form-group">
+                    <label>Code type</label>
+                    <div style="display:flex; gap:16px; flex-wrap:wrap;">
+                        <label style="display:flex; align-items:center; gap:8px; font-weight:normal; cursor:pointer;">
+                            <input type="radio" name="bcsSymbol" value="qr" checked onchange="bcsUpdate()"><span>QR code</span>
+                        </label>
+                        <label style="display:flex; align-items:center; gap:8px; font-weight:normal; cursor:pointer;">
+                            <input type="radio" name="bcsSymbol" value="barcode" onchange="bcsUpdate()"><span>Line barcode (Code 128)</span>
+                        </label>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="bcsText">Sticker text (becomes the code and the caption)</label>
+                    <input type="text" id="bcsText" placeholder="XPRESSDNA3" oninput="bcsUpdate()" style="font-family:monospace; font-size:16px; text-transform:none;">
+                    <small style="color:#6b7280; font-size:12px; display:block; margin-top:4px;">Letters, numbers and symbols all work. Line breaks are ignored.</small>
+                </div>
+                <div class="grid-2">
+                    <div class="form-group">
+                        <label for="bcsPreset">Sticker size</label>
+                        <select id="bcsPreset" onchange="bcsApplyPreset()" style="width:100%; padding:10px; border:2px solid #d1d5db; border-radius:6px; font-size:14px;">
+                            <option value="380x200">Flag sticker (380 × 200 dots)</option>
+                            <option value="300x150">1.5" × 0.75" (300 × 150 dots)</option>
+                            <option value="300x200">1.5" × 1" (300 × 200 dots)</option>
+                            <option value="250x125">1.25" × 0.6" (250 × 125 dots)</option>
+                            <option value="200x200">1" × 1" (200 × 200 dots)</option>
+                            <option value="400x200">2" × 1" (400 × 200 dots)</option>
+                            <option value="400x150">2" × 0.75" (400 × 150 dots)</option>
+                            <option value="400x100">2" × 0.5" (400 × 100 dots)</option>
+                            <option value="400x250">2" × 1.25" (400 × 250 dots)</option>
+                            <option value="600x200">3" × 1" (600 × 200 dots)</option>
+                            <option value="800x200">4" × 1" (800 × 200 dots)</option>
+                            <option value="custom">Custom…</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Width × Height (dots, 203 dpi)</label>
+                        <div style="display:flex; gap:6px; align-items:center;">
+                            <input type="number" id="bcsW" value="380" min="80" max="1200" oninput="bcsCustom()" style="width:100%;">
+                            <span>×</span>
+                            <input type="number" id="bcsH" value="200" min="60" max="1200" oninput="bcsCustom()" style="width:100%;">
+                        </div>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Text position</label>
+                    <div style="display:flex; gap:16px; flex-wrap:wrap;">
+                        <label style="display:flex; align-items:center; gap:8px; font-weight:normal; cursor:pointer;">
+                            <input type="radio" name="bcsCapPos" value="top" checked onchange="bcsUpdate()"><span>Text on top, code below</span>
+                        </label>
+                        <label style="display:flex; align-items:center; gap:8px; font-weight:normal; cursor:pointer;">
+                            <input type="radio" name="bcsCapPos" value="bottom" onchange="bcsUpdate()"><span>Code on top, text below</span>
+                        </label>
+                    </div>
+                </div>
+                <div class="grid-2">
+                    <div class="form-group">
+                        <label>Alignment</label>
+                        <div style="display:flex; gap:16px; flex-wrap:wrap;">
+                            <label style="display:flex; align-items:center; gap:8px; font-weight:normal; cursor:pointer;">
+                                <input type="radio" name="bcsAlign" value="left" checked onchange="bcsUpdate()"><span>Left</span>
+                            </label>
+                            <label style="display:flex; align-items:center; gap:8px; font-weight:normal; cursor:pointer;">
+                                <input type="radio" name="bcsAlign" value="center" onchange="bcsUpdate()"><span>Center</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="bcsMag">QR square size</label>
+                        <select id="bcsMag" onchange="bcsUpdate()" style="width:100%; padding:10px; border:2px solid #d1d5db; border-radius:6px; font-size:14px;">
+                            <option value="auto">Auto (biggest that fits)</option>
+                            <option value="3">3 dots</option>
+                            <option value="4">4 dots</option>
+                            <option value="5">5 dots</option>
+                            <option value="6">6 dots</option>
+                            <option value="7">7 dots</option>
+                            <option value="8">8 dots</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="grid-2">
+                    <div class="form-group">
+                        <label for="bcsOffX">Printer shift X (dots)</label>
+                        <input type="number" id="bcsOffX" value="0" min="-100" max="200" step="2" oninput="bcsUpdate()">
+                    </div>
+                    <div class="form-group">
+                        <label for="bcsOffY">Printer shift Y (dots)</label>
+                        <input type="number" id="bcsOffY" value="40" min="-100" max="200" step="2" oninput="bcsUpdate()">
+                    </div>
+                </div>
+                <small style="color:#6b7280; font-size:12px; display:block; margin:-6px 0 10px;">💡 Calibration for where the printer actually lands on the sticker — it moves the print, not the design, so the preview doesn't change. Cut off on top → raise Y. Cut off on the bottom → lower Y. Cut off on the left/right → adjust X (positive = right / down). 40 is set by default because the ZT410 starts printing about 40 dots above these stickers.</small>
+                <div style="background:#c8c8c8; border:2px solid #888; padding:16px; border-radius:6px; text-align:center; overflow:auto;">
+                    <canvas id="bcsCanvas" style="background:#fff; box-shadow:0 2px 6px rgba(0,0,0,.25); max-width:100%;"></canvas>
+                </div>
+                <div id="bcsInfo" style="font-size:12px; color:#374151; margin-top:8px;"></div>
+            </div>
+
+            <div class="form-group flag-only">
                 <label for="labelText">Main Label Text (one line per field)</label>
                 <textarea id="labelText" placeholder="Enter your label text&#10;Line 2&#10;Line 3" rows="4" oninput="updatePreview()"></textarea>
             </div>
 
-            <div class="form-group">
+            <div class="form-group flag-only">
                 <label for="imageUpload">Image Upload (Optional - or use QR Code below)</label>
                 <input type="file" id="imageUpload" accept="image/*" multiple onchange="handleImageUpload(event)">
                 
@@ -2948,7 +3101,7 @@ postHost({ type:'bw:ready' });
                 </div>
             </div>
 
-            <div id="imageControls" style="display: none; margin-top: 15px; padding: 15px; background: #f3f4f6; border-radius: 8px;">
+            <div id="imageControls" class="flag-only" style="display: none; margin-top: 15px; padding: 15px; background: #f3f4f6; border-radius: 8px;">
                 <h4 style="margin-bottom: 10px; color: #374151;">Image Position & Size</h4>
                 <div class="grid-2" style="margin-bottom: 10px;">
                     <div>
@@ -2968,7 +3121,7 @@ postHost({ type:'bw:ready' });
             </div>
 
             <!-- QR CODE GENERATOR SECTION -->
-            <div class="qr-section">
+            <div class="qr-section flag-only">
                 <h3 style="margin-bottom: 15px; color: #374151;">📱 QR Code Generator (Use as Label Image)</h3>
                 <div class="qr-input-group">
                     <label for="qrText">Enter Text or URL:</label>
@@ -2984,7 +3137,7 @@ postHost({ type:'bw:ready' });
                 <button id="useQrBtn" class="btn-use-qr" onclick="useQRAsImage()" style="width: 100%; display: none;">✅ Use This QR Code as Label Image</button>
             </div>
 
-            <div class="form-group">
+            <div class="form-group flag-only">
                 <label>Print Mode</label>
                 <div style="display: flex; gap: 10px; align-items: center;">
                     <label style="display: flex; align-items: center; gap: 8px; font-weight: normal; cursor: pointer;">
@@ -2999,12 +3152,12 @@ postHost({ type:'bw:ready' });
                 <small style="color: #6b7280; font-size: 12px; margin-top: 4px; display: block;">Standard Mode recommended for images</small>
             </div>
 
-            <div class="form-group">
+            <div class="form-group flag-only">
                 <label for="barcodeData">Barcode Data (Optional)</label>
                 <input type="text" id="barcodeData" placeholder="Enter barcode number" oninput="updatePreview()">
             </div>
 
-            <div class="form-group">
+            <div class="form-group flag-only">
                 <label for="dotText">Dot Circle Text (Optional)</label>
                 <input type="text" id="dotText" placeholder="Enter text for circle area" maxlength="3" oninput="updatePreview()">
                 <small style="color: #6b7280; font-size: 12px; margin-top: 4px; display: block;">Max 3 characters</small>
@@ -3125,7 +3278,7 @@ postHost({ type:'bw:ready' });
                 </button>
             </div>
 
-            <div class="preview-section">
+            <div class="preview-section flag-only">
                 <h3>Label Preview:</h3>
                 <div class="label-preview" id="labelPreview">
                     <div id="modeIndicator" class="mode-indicator standard">STANDARD MODE</div>
@@ -4554,6 +4707,7 @@ ${barcodeSection}
         }
 
         function generateZPL() {
+            if (bcsIsActive()) return bcsBuildZPL();
             const labelTextInput = document.getElementById('labelText').value || 'SAMPLE TEXT';
             let barcodeData = document.getElementById('barcodeData').value;
             const dotText = document.getElementById('dotText').value;
@@ -6093,7 +6247,7 @@ function queueCurrentDesignAsJob(){
     const name=p?p.name:ip;
     let zpl; try{ zpl=generateZPL(); }catch(e){ alert('Could not generate label: '+e.message); return; }
     const copies=document.getElementById('copies').value||'1';
-    const label=(document.getElementById('labelText').value||'').split('\n').filter(Boolean)[0]||'(label)';
+    const label=bcsIsActive() ? ('🏷️ '+(bcsGetText()||'(sticker)')) : ((document.getElementById('labelText').value||'').split('\n').filter(Boolean)[0]||'(label)');
     createJob({ printerName:name, printerIP:ip, port:port, zpl:zpl, copies:String(copies), label:label });
 }
 function buildSimpleZPL(text, barcode, copies){
@@ -6207,6 +6361,350 @@ function clearFinishedJobs(){ const k=getSyncKey(); if(!rpReady||!k) return; rpJ
 try { rpInit(); } catch(e){ console.error('[RP] startup', e); }
 /* ════════════════ end remote print module ════════════════ */
 
+/* ════════════════ BARCODE STICKER (one line → Code 128 + caption) ════════════════ */
+var BCS_PATTERNS = ["212222","222122","222221","121223","121322","131222","122213","122312","132212","221213",
+"221312","231212","112232","122132","122231","113222","123122","123221","223211","221132",
+"221231","213212","223112","312131","311222","321122","321221","312212","322112","322211",
+"212123","212321","232121","111323","131123","131321","112313","132113","132311","211313",
+"231113","231311","112133","112331","132131","113123","113321","133121","313121","211331",
+"231131","213113","213311","213131","311123","311321","331121","312113","312311","332111",
+"314111","221411","431111","111224","111422","121124","121421","141122","141221","112214",
+"112412","122114","122411","142112","142211","241211","221114","413111","241112","134111",
+"111242","121142","121241","114212","124112","124211","411212","421112","421211","212141",
+"214121","412121","111143","111341","131141","114113","114311","411113","411311","113141",
+"114131","311141","411131","211412","211214","211232","2331112"];
+
+function bcsIsActive() {
+    var r = document.querySelector('input[name="labelLayout"]:checked');
+    return !!(r && r.value === 'sticker');
+}
+
+// Single line, printable ASCII only (what Code 128 subset B can carry)
+function bcsCapTop() {
+    var r = document.querySelector('input[name="bcsCapPos"]:checked');
+    return !r || r.value !== 'bottom';
+}
+
+function bcsAlignLeft() {
+    var r = document.querySelector('input[name="bcsAlign"]:checked');
+    return !r || r.value !== 'center';
+}
+
+function bcsGetText() {
+    var el = document.getElementById('bcsText');
+    var t = (el && el.value) || '';
+    t = t.replace(/[\r\n\t]+/g, ' ').replace(/[^\x20-\x7E]/g, '').trim();
+    return t;
+}
+
+// Code 128-B module sequence for the preview (printer encodes its own via ^BC)
+function bcsEncode(text) {
+    var codes = [104], sum = 104;
+    for (var i = 0; i < text.length; i++) {
+        var v = text.charCodeAt(i) - 32;
+        codes.push(v); sum += v * (i + 1);
+    }
+    codes.push(sum % 103); codes.push(106);
+    var mods = [];
+    codes.forEach(function (c) {
+        var pat = BCS_PATTERNS[c];
+        for (var j = 0; j < pat.length; j++) {
+            for (var k = 0; k < +pat[j]; k++) mods.push(j % 2 === 0 ? 1 : 0);
+        }
+    });
+    return mods; // 11*n + 35 modules
+}
+
+// Escape ^ ~ _ for ^FH (hex) so any text is ZPL-safe
+function bcsZplEscape(t) {
+    return t.replace(/[_^~\\]/g, function (c) {
+        return '_' + c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0');
+    });
+}
+
+function bcsNum(id, def) {
+    var v = parseInt((document.getElementById(id) || {}).value, 10);
+    return isNaN(v) ? def : v;
+}
+
+// One layout function used by both the preview and the ZPL, so they can't drift apart
+function bcsSymbol() {
+    var r = document.querySelector('input[name="bcsSymbol"]:checked');
+    return (r && r.value === 'barcode') ? 'barcode' : 'qr';
+}
+
+// Exact QR module matrix from qrcode.js (already loaded for the QR generator). null if unavailable.
+function bcsQRMatrix(text) {
+    if (typeof QRCode === 'undefined' || !text) return null;
+    try {
+        var div = document.createElement('div');
+        var q = new QRCode(div, { text: text, width: 64, height: 64, correctLevel: QRCode.CorrectLevel.M });
+        var m = q._oQRCode, n = m.getModuleCount(), rows = [];
+        for (var r = 0; r < n; r++) {
+            var row = [];
+            for (var c = 0; c < n; c++) row.push(m.isDark(r, c) ? 1 : 0);
+            rows.push(row);
+        }
+        return rows;
+    } catch (e) { console.warn('[BCS] QR matrix failed', e); return null; }
+}
+
+// Fallback size estimate for the printer's own ^BQ (level M) when qrcode.js didn't load
+function bcsQREstimateModules(text) {
+    var alnum = /^[0-9A-Z $%*+\-.\/:]*$/.test(text);
+    var cap = alnum ? [20, 38, 61, 90, 122, 154, 178, 221, 262, 311] : [14, 26, 42, 62, 84, 106, 122, 152, 180, 213];
+    for (var v = 0; v < cap.length; v++) if (text.length <= cap[v]) return 21 + 4 * v;
+    return 61;
+}
+
+// Caption font that fits the line in the width (A0 averages ~0.62 × height per char)
+function bcsFont(n, usableW, maxH) {
+    return Math.max(14, Math.min(maxH, Math.floor(usableW / (n * 0.62)), 80));
+}
+
+// One layout function used by both the preview and the ZPL, so they can't drift apart
+function bcsLayout() {
+    var text = bcsGetText();
+    var W = Math.max(80, bcsNum('bcsW', 380));
+    var H = Math.max(60, bcsNum('bcsH', 200));
+    var n = Math.max(1, text.length);
+    var margin = Math.max(8, Math.round(Math.min(W, H) * 0.06));
+    var usableW = W - 2 * margin;
+    var capTop = bcsCapTop();
+    var left = bcsAlignLeft();
+    var gap = Math.max(4, Math.round(H * 0.04));
+    var L = { text: text, W: W, H: H, margin: margin, capTop: capTop, symbol: bcsSymbol(), left: left,
+              offX: bcsNum('bcsOffX', 0), offY: bcsNum('bcsOffY', 40), warn: [] };
+
+    if (L.symbol === 'qr') {
+        L.fontH = bcsFont(n, usableW, Math.round(H * 0.18));
+        var matrix = text ? bcsQRMatrix(text) : null;
+        var nm = matrix ? matrix.length : bcsQREstimateModules(text);
+        var availH = H - 2 * margin - gap - L.fontH;
+        var maxMag = Math.floor(Math.min(availH, usableW) / nm);
+        var want = (document.getElementById('bcsMag') || {}).value || 'auto';
+        var mag = want === 'auto' ? maxMag : parseInt(want, 10);
+        L.fits = maxMag >= 1;
+        if (want !== 'auto' && mag > maxMag) L.warn.push('QR at ' + mag + ' dots/square runs past the sticker (max ' + Math.max(1, maxMag) + ') — lower it or raise the height');
+        mag = Math.max(1, Math.min(10, mag));
+        L.matrix = matrix; L.nm = nm; L.mag = mag; L.symW = L.symH = nm * mag;
+        L.symX = left ? margin : Math.round((W - L.symW) / 2);
+        var blockH = L.fontH + gap + L.symH;
+        var top = Math.max(margin, Math.round((H - blockH) / 2));
+        L.textY = capTop ? top : top + L.symH + gap;
+        L.symY = capTop ? top + L.fontH + gap : top;
+        if (mag < 3) L.warn.push('small QR squares (' + mag + ' dot' + (mag > 1 ? 's' : '') + ') — try a shorter text or bigger sticker');
+        if (!matrix && text) L.warn.push('QR library not loaded — printer will draw it with ^BQ, size is estimated');
+        return L;
+    }
+
+    // Code 128
+    var modules = 11 * n + 35;
+    var mod = Math.floor(usableW / (modules + 20));
+    if (mod < 1) { mod = Math.floor(usableW / modules); if (mod >= 1) L.warn.push('tight side margins — may scan less reliably'); }
+    L.fits = mod >= 1;
+    mod = Math.max(1, Math.min(4, mod));
+    L.fontH = bcsFont(n, usableW, Math.round(H * 0.22));
+    L.mod = mod; L.modules = modules; L.symW = modules * mod;
+    L.symH = Math.max(20, H - 2 * margin - gap - L.fontH);
+    L.symX = left ? margin : Math.round((W - L.symW) / 2);
+    L.symY = capTop ? margin + L.fontH + gap : margin;
+    L.textY = capTop ? margin : L.symY + L.symH + gap;
+    if (mod === 1) L.warn.push('thin bars — older scanners may struggle');
+    if (L.symW > W) L.fits = false;
+    return L;
+}
+
+function bcsMatrixToGFA(matrix, mag) {
+    var n = matrix.length, w = n * mag, bpr = Math.ceil(w / 8), hex = '';
+    for (var r = 0; r < n; r++) {
+        var line = '';
+        for (var b = 0; b < bpr; b++) {
+            var byte = 0;
+            for (var bit = 0; bit < 8; bit++) {
+                var x = b * 8 + bit;
+                if (x < w && matrix[r][Math.floor(x / mag)]) byte |= (0x80 >> bit);
+            }
+            line += byte.toString(16).toUpperCase().padStart(2, '0');
+        }
+        for (var k = 0; k < mag; k++) hex += line;
+    }
+    var total = bpr * w;
+    return '^GFA,' + total + ',' + total + ',' + bpr + ',' + hex;
+}
+
+function bcsBuildZPL() {
+    var L = bcsLayout();
+    if (!L.text) throw new Error('Sticker text is empty');
+    var copies = (document.getElementById('copies') || {}).value || 1;
+    var esc = bcsZplEscape(L.text);
+    var sx = Math.max(0, L.symX + L.offX), sy = Math.max(0, L.symY + L.offY);
+    var sym;
+    if (L.symbol === 'qr') {
+        sym = L.matrix
+            ? '^FO' + sx + ',' + sy + bcsMatrixToGFA(L.matrix, L.mag) + '^FS'
+            : '^FO' + sx + ',' + sy + '^BQN,2,' + L.mag + '^FH_^FDMA,' + esc + '^FS';
+    } else {
+        sym = '^FO' + sx + ',' + sy + '^BY' + L.mod + '^BCN,' + L.symH + ',N,N,N^FH_^FD' + esc + '^FS';
+    }
+    return '^XA\n' +
+        '^CI28\n' +
+        '^PW' + (L.W + Math.max(0, L.offX)) + '\n' +
+        '^LL' + (L.H + Math.max(0, L.offY)) + '\n' +
+        sym + '\n' +
+        (L.left
+            ? '^FO' + Math.max(0, L.margin + L.offX) + ',' + Math.max(0, L.textY + L.offY) + '^A0N,' + L.fontH + ',' + L.fontH +
+              '^FB' + (L.W - 2 * L.margin) + ',1,0,L^FH_^FD' + esc + '^FS\n'
+            : '^FO' + Math.max(0, L.offX) + ',' + Math.max(0, L.textY + L.offY) + '^A0N,' + L.fontH + ',' + L.fontH +
+              '^FB' + (L.W + 2 * Math.min(0, L.offX)) + ',1,0,C^FH_^FD' + esc + '^FS\n') +
+        '^PQ' + copies + '\n' +
+        '^XZ';
+}
+
+function bcsDraw() {
+    var cv = document.getElementById('bcsCanvas');
+    if (!cv) return;
+    var L = bcsLayout();
+    var scale = Math.min(2, 560 / L.W);
+    var pad = 10;
+    cv.width = Math.round(L.W * scale) + pad * 2;
+    cv.height = Math.round(L.H * scale) + pad * 2;
+    var g = cv.getContext('2d');
+    g.fillStyle = '#c8c8c8'; g.fillRect(0, 0, cv.width, cv.height);
+    g.save();
+    g.translate(pad, pad);
+    g.scale(scale, scale);
+    g.fillStyle = '#fff';
+    g.beginPath();
+    if (g.roundRect) g.roundRect(0, 0, L.W, L.H, 10); else g.rect(0, 0, L.W, L.H);
+    g.fill();
+    var info = document.getElementById('bcsInfo');
+    if (L.text) {
+        g.fillStyle = '#000';
+        if (L.symbol === 'qr') {
+            if (L.matrix) {
+                var qc = document.createElement('canvas');
+                qc.width = qc.height = L.nm;
+                var qg = qc.getContext('2d');
+                qg.fillStyle = '#000';
+                for (var r = 0; r < L.nm; r++) for (var c = 0; c < L.nm; c++)
+                    if (L.matrix[r][c]) qg.fillRect(c, r, 1, 1);
+                g.imageSmoothingEnabled = false;
+                g.drawImage(qc, L.symX, L.symY, L.symW, L.symH);
+            } else {
+                g.strokeStyle = '#000'; g.strokeRect(L.symX, L.symY, L.symW, L.symH);
+                g.font = '14px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+                g.fillText('QR', L.symX + L.symW / 2, L.symY + L.symH / 2);
+            }
+        } else {
+            var mods = bcsEncode(L.text);
+            for (var i = 0; i < mods.length; i++) if (mods[i]) g.fillRect(L.symX + i * L.mod, L.symY, L.mod, L.symH);
+        }
+        g.font = 'bold ' + L.fontH + 'px "Arial Narrow", "Helvetica Neue", Arial, sans-serif';
+        g.textAlign = L.left ? 'left' : 'center'; g.textBaseline = 'top';
+        g.fillText(L.text, L.left ? L.margin : L.W / 2, L.textY + 1, L.W - 2 * L.margin);
+    } else {
+        g.fillStyle = '#9ca3af';
+        g.font = '20px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+        g.fillText('Type sticker text above', L.W / 2, L.H / 2);
+    }
+    g.restore();
+    g.save();
+    g.translate(pad, pad);
+    g.setLineDash([6, 4]); g.strokeStyle = '#ef4444'; g.lineWidth = 1.5;
+    g.strokeRect(0.5, 0.5, L.W * scale - 1, L.H * scale - 1);
+    g.restore();
+
+    if (info) {
+        if (!L.text) { info.textContent = ''; }
+        else if (!L.fits) {
+            info.innerHTML = '<span style="color:#b91c1c; font-weight:600;">⚠️ Too much text for this sticker size — use a bigger sticker or shorter text.</span>';
+        } else {
+            var desc = L.symbol === 'qr'
+                ? 'QR ' + L.nm + '×' + L.nm + ' squares · ' + L.mag + ' dots each · ' + L.symW + '×' + L.symH + ' dots'
+                : 'Code 128 · bar width ' + L.mod + ' dot' + (L.mod > 1 ? 's' : '') + ' · ' + L.symW + '×' + L.symH + ' dots';
+            info.innerHTML = '✅ ' + L.text.length + ' chars · ' + desc + ' · caption ' + L.fontH + ' dots tall' +
+                L.warn.map(function (w) { return ' · <span style="color:#b45309;">' + w + '</span>'; }).join('');
+        }
+    }
+}
+
+function bcsSave() {
+    try {
+        localStorage.setItem('bcsSettings', JSON.stringify({
+            layout: bcsIsActive() ? 'sticker' : 'flag',
+            text: (document.getElementById('bcsText') || {}).value || '',
+            preset: document.getElementById('bcsPreset').value,
+            W: bcsNum('bcsW', 380), H: bcsNum('bcsH', 200), symbol: bcsSymbol(), sizeV: 4,
+            align: bcsAlignLeft() ? 'left' : 'center', mag: (document.getElementById('bcsMag') || {}).value || 'auto',
+            offX: bcsNum('bcsOffX', 0), offY: bcsNum('bcsOffY', 40), calV: 2,
+            capPos: bcsCapTop() ? 'top' : 'bottom'
+        }));
+    } catch (e) {}
+}
+
+function bcsUpdate() { bcsDraw(); bcsSave(); }
+
+function bcsApplyPreset() {
+    var v = document.getElementById('bcsPreset').value;
+    if (v !== 'custom') {
+        var p = v.split('x');
+        document.getElementById('bcsW').value = p[0];
+        document.getElementById('bcsH').value = p[1];
+    }
+    bcsUpdate();
+}
+
+function bcsCustom() {
+    var W = bcsNum('bcsW', 380), H = bcsNum('bcsH', 200);
+    var sel = document.getElementById('bcsPreset');
+    var match = W + 'x' + H;
+    sel.value = Array.prototype.some.call(sel.options, function (o) { return o.value === match; }) ? match : 'custom';
+    bcsUpdate();
+}
+
+function bcsSetLayout(v) {
+    var d = document.getElementById('labelDesigner');
+    if (d) d.classList.toggle('sticker-mode', v === 'sticker');
+    bcsUpdate();
+}
+
+(function bcsInit() {
+    try {
+        var st = JSON.parse(localStorage.getItem('bcsSettings') || 'null');
+        if (st) {
+            if (st.text) document.getElementById('bcsText').value = st.text;
+            var fresh = st.sizeV !== 4;   // older saves predate the flag-sticker default
+            document.getElementById('bcsW').value = fresh ? 380 : (st.W || 380);
+            document.getElementById('bcsH').value = fresh ? 200 : (st.H || 200);
+            if (!fresh && st.align === 'center') {
+                var ac = document.querySelector('input[name="bcsAlign"][value="center"]');
+                if (ac) ac.checked = true;
+            }
+            if (!fresh && st.mag) document.getElementById('bcsMag').value = st.mag;
+            document.getElementById('bcsOffX').value = st.offX || 0;
+            document.getElementById('bcsOffY').value = (st.calV === 2) ? (st.offY || 0) : 40;
+            document.getElementById('bcsPreset').value = fresh ? '380x200' : (st.preset || '380x200');
+            if (st.symbol === 'barcode') {
+                var sb = document.querySelector('input[name="bcsSymbol"][value="barcode"]');
+                if (sb) sb.checked = true;
+            }
+            if (st.capPos === 'bottom') {
+                var cp = document.querySelector('input[name="bcsCapPos"][value="bottom"]');
+                if (cp) cp.checked = true;
+            }
+            if (st.layout === 'sticker') {
+                var r = document.querySelector('input[name="labelLayout"][value="sticker"]');
+                if (r) r.checked = true;
+            }
+        }
+    } catch (e) {}
+    try {
+        bcsSetLayout(bcsIsActive() ? 'sticker' : 'flag');
+    } catch (e) { console.error('[BCS] init', e); }
+})();
+/* ════════════════ end barcode sticker ════════════════ */
+
 /* ════════════════ FLOOR MAP QUICK PRINT ════════════════ */
 (function(){
 'use strict';
@@ -6264,13 +6762,16 @@ const DESKS = {
     // Bottom
     jillian:   'Jillian',
     jayla:     'Jayla',
+    // Floaters
+    andrew:    'Andrew',
+    kimeal:    'Kimeal',
 };
 
 /* ─────────────────────────────────────────────────────────────
    GRID LAYOUT
    Mirrors the screenshot exactly as a 2D grid.
    The whole floor is a CSS grid with two "column zones":
-     • LEFT (cols 1-3):  Left Island
+     • LEFT (cols 1-3):  Left Island, Floaters
      • RIGHT (cols 5-9): Top row + all clusters
    A gap column (col 4) separates them spatially.
 
@@ -6325,6 +6826,8 @@ const GRID_ROWS = [
     // ── Bottom ───────────────────────────────────────────────────────────────────
     [   null,    null,    null,    null,   null,      'jillian', 'jayla',   null,    null       ],
 
+    // ── Floaters (left side, below island) ───────────────────────────────────────
+    [   'andrew','kimeal', null,   null,   null,      null,      null,      null,    null       ],
 ];
 
 /* ─────────────────────────────────────────────────────────────
@@ -6784,25 +7287,8 @@ document.querySelector('.main-container').appendChild(panel);
    STATE
 ───────────────────────────────────────────────────────────── */
 let fmMode = 'print';
-/* Desks removed from the layout. Their stored IPs/names would otherwise sit in
-   storage forever, get carried into backups, and inflate the printout count. */
-const FM_RETIRED = ['andrew', 'kimeal'];
-function fmPurgeRetired(){
-    let hit = false;
-    FM_RETIRED.forEach(id => {
-        if (id in deskIps)   { delete deskIps[id];   hit = true; }
-        if (id in deskNames) { delete deskNames[id]; hit = true; }
-    });
-    if (hit) {
-        try { localStorage.setItem(FM_KEY, JSON.stringify(deskIps)); } catch(e){}
-        try { localStorage.setItem(FM_NAME_KEY, JSON.stringify(deskNames)); } catch(e){}
-        console.warn('[FM] dropped data for retired desks:', FM_RETIRED.join(', '));
-    }
-}
-
 let deskIps = fmLoad();
 let deskNames = fmLoadNames();
-fmPurgeRetired();
 const fmTimers = {};
 
 /* ─────────────────────────────────────────────────────────────
@@ -6959,23 +7445,17 @@ function fmPrint(deskId, ip, label, cellEl) {
    lives inside a script block itself, so emitting one would end it
    early. We drive the new window from here instead.
 ───────────────────────────────────────────────────────────── */
-/* Grid cells that exist in the layout but not in the room. Add ids here to
-   drop them from the printout while keeping them on screen. */
-const FM_PRINT_HIDE = [];
-
 const FM_PRINT_CSS = `
   @page { size: letter landscape; margin: 0.4in; }
   * { box-sizing: border-box; }
   body { margin:0; font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; color:#000; background:#fff; }
-  /* inline-block so scrollWidth is the CONTENT width, not the window width —
-     without this the scale factor is computed against the viewport and the
-     plan can never grow to fill the sheet. */
-  #page { transform-origin: top left; display: inline-block; }
+  #page { transform-origin: top left; }
   .hd { display:flex; align-items:baseline; gap:10px; border-bottom:2px solid #000; padding-bottom:5px; margin-bottom:9px; }
   .hd h1 { font-size:15px; margin:0; letter-spacing:.3px; }
   .hd .meta { font-size:9.5px; color:#444; margin-left:auto; }
-  .plan { display:flex; gap:22px; align-items:flex-start; }
-  .grid { display:grid; grid-template-columns: repeat(3, 84px) 16px repeat(5, 84px); gap:5px; }
+  .cols { display:flex; gap:16px; align-items:flex-start; }
+  .plan { display:flex; gap:14px; align-items:flex-start; }
+  .grid { display:grid; grid-template-columns: repeat(3, 74px) 14px repeat(5, 74px); gap:4px; }
   .c { border:1px solid #999; border-radius:4px; padding:3px 2px; min-height:34px;
        display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; }
   .c.has { border:1.6px solid #000; }
@@ -6988,7 +7468,14 @@ const FM_PRINT_CSS = `
   .wingttl { font-size:9.5px; font-weight:800; text-transform:uppercase; letter-spacing:.7px; margin-bottom:1px; }
   .pod { border:1px dashed #666; border-radius:5px; padding:4px 5px 5px; }
   .pt { font-size:7px; font-weight:800; letter-spacing:.7px; color:#555; margin-bottom:3px; }
-  .pg { display:grid; grid-template-columns: repeat(2, 84px); gap:5px; }
+  .pg { display:grid; grid-template-columns: repeat(2, 74px); gap:4px; }
+  .ref { min-width:210px; }
+  .refttl { font-size:9.5px; font-weight:800; text-transform:uppercase; letter-spacing:.7px;
+            border-bottom:1px solid #000; padding-bottom:2px; margin-bottom:4px; }
+  .lr { display:flex; justify-content:space-between; gap:10px; font-size:8.6px;
+        padding:1.4px 0; border-bottom:1px dotted #ccc; }
+  .lr b { font-family:ui-monospace,Consolas,monospace; }
+  .none { font-size:9px; color:#666; font-style:italic; }
 `;
 
 function fmBuildPrintout() {
@@ -7001,36 +7488,40 @@ function fmBuildPrintout() {
         return `<div class="c${ip ? ' has' : ''}"><div class="n">${esc(fmLabel(id))}</div><div class="i">${esc(ip || '—')}</div></div>`;
     };
 
-    // Desks that exist in the app's grid but not in the physical room.
-    // Hidden from the printout only — they stay tappable on screen.
-    const HIDE = FM_PRINT_HIDE;
     let main = '';
-    GRID_ROWS.forEach(row => {
-        // A row of nothing but gaps would print as a band of white space.
-        const hasContent = row.some((id, ci) => ci !== 3 && id !== null && HIDE.indexOf(id) === -1);
-        if (!hasContent) return;
-        row.forEach((id, ci) => {
-            if (ci === 3) { main += '<div class="sp"></div>'; return; }
-            main += (id !== null && HIDE.indexOf(id) !== -1) ? '<div class="c gap"></div>' : cellHTML(id);
-        });
-    });
+    GRID_ROWS.forEach(row => row.forEach((id, ci) => {
+        main += (ci === 3) ? '<div class="sp"></div>' : cellHTML(id);
+    }));
 
     const wing = WING_PODS.map((pod, pi) =>
         `<div class="pod"><div class="pt">Pod ${pi + 1}</div><div class="pg">${pod.map(cellHTML).join('')}</div></div>`
     ).join('');
 
-    const assignedCount = Object.keys(deskIps).filter(id => deskIps[id] && HIDE.indexOf(id) === -1).length;
+    const assigned = Object.keys(deskIps)
+        .filter(id => deskIps[id])
+        .map(id => ({ n: fmLabel(id), ip: deskIps[id] }))
+        .sort((a, b) => a.n.localeCompare(b.n, undefined, { numeric: true }));
+
+    const list = assigned.length
+        ? assigned.map(r => `<div class="lr"><span>${esc(r.n)}</span><b>${esc(r.ip)}</b></div>`).join('')
+        : '<div class="none">No IPs assigned yet.</div>';
 
     return `<!DOCTYPE html><html><head><meta charset="utf-8">
 <title>Lab Floor Map — Zebra printers</title><style>${FM_PRINT_CSS}</style></head><body>
 <div id="page">
   <div class="hd">
     <h1>LAB FLOOR MAP — ZEBRA PRINTERS</h1>
-    <div class="meta">${esc(assignedCount)} printers mapped &nbsp;·&nbsp; sync key: ${esc(key)} &nbsp;·&nbsp; ${esc(new Date().toLocaleString())}</div>
+    <div class="meta">${esc(assigned.length)} printers mapped &nbsp;·&nbsp; sync key: ${esc(key)} &nbsp;·&nbsp; ${esc(new Date().toLocaleString())}</div>
   </div>
-  <div class="plan">
-    <div class="grid">${main}</div>
-    <div class="wing"><div class="wingttl">${esc(WING_TITLE)}</div>${wing}</div>
+  <div class="cols">
+    <div class="plan">
+      <div class="grid">${main}</div>
+      <div class="wing"><div class="wingttl">${esc(WING_TITLE)}</div>${wing}</div>
+    </div>
+    <div class="ref">
+      <div class="refttl">All assigned IPs (${esc(assigned.length)})</div>
+      ${list}
+    </div>
   </div>
 </div>
 </body></html>`;
@@ -7065,10 +7556,8 @@ function fmPrintLayout() {
             const AVAIL_W = 979, AVAIL_H = 739;
             const w = page ? page.scrollWidth : 0, h = page ? page.scrollHeight : 0;
             if (page && w && h) {
-                // Grow to fill the sheet, not just shrink to fit it. Capped so a
-                // nearly-empty map doesn't blow up into four giant boxes.
-                const s = Math.min(AVAIL_W / w, AVAIL_H / h, 3.5);
-                if (Math.abs(s - 1) > 0.01) page.style.transform = 'scale(' + s.toFixed(4) + ')';
+                const s = Math.min(1, AVAIL_W / w, AVAIL_H / h);
+                if (s < 1) page.style.transform = 'scale(' + s.toFixed(4) + ')';
             }
         } catch(e) {}
         try { win.focus(); win.print(); } catch(e) {}
@@ -7314,17 +7803,6 @@ try { rpInit(); } catch(e){ console.error('[RP] startup', e); }
 <!-- Firebase v9 compat (matches Persona City) -->
 <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-database-compat.js"></script>
-<script>
-// Plenty of corporate networks and blockers allow cdnjs but not gstatic. If the
-// primary CDN didn't deliver, pull the same compat build from the mirror that
-// already serves this page's other libraries. document.write keeps it
-// parser-synchronous, so the app script below still sees `firebase` defined.
-if (typeof firebase === 'undefined') {
-    var FB_FALLBACK = 'https://cdnjs.cloudflare.com/ajax/libs/firebase/9.23.0/';
-    document.write('<script src="' + FB_FALLBACK + 'firebase-app-compat.js"><' + '/script>');
-    document.write('<script src="' + FB_FALLBACK + 'firebase-database-compat.js"><' + '/script>');
-}
-</script>
 
 <script>
 // ─── Firebase setup (matches Persona City config) ────────────────────
@@ -7343,11 +7821,9 @@ if (typeof firebase === 'undefined') {
             '<h1>📓 Lab Notebook</h1>' +
             '<p class="hint" style="color:#fca5a5; line-height:1.6;">' +
             'Couldn\'t load the Firebase SDK from <b>gstatic.com</b>, so the app can\'t start.<br><br>' +
-            'Both <b>gstatic.com</b> and the <b>cdnjs.cloudflare.com</b> fallback failed.<br><br>' +
             'Most common causes:<br>' +
-            '• Opening this file straight from disk (<b>file://</b>) — put it on GitHub Pages or a local server instead.<br>' +
             '• A content/ad blocker (uBlock Origin, Brave Shields, Firefox strict tracking) — allow ' +
-            '<b>www.gstatic.com</b>, <b>cdnjs.cloudflare.com</b> and <b>*.firebaseio.com</b> for this site, then reload.<br>' +
+            '<b>www.gstatic.com</b> and <b>*.firebaseio.com</b> for this site, then reload.<br>' +
             '• No network connection.<br>' +
             '• You\'re viewing this inside an in-app preview/sandbox — open the real GitHub Pages URL instead.' +
             '</p>';
@@ -7445,6 +7921,8 @@ function switchTab(t) {
     $('view-sops').style.display = (t === 'sops') ? '' : 'none';
     $('view-notebooks').style.display = (t === 'notebooks') ? '' : 'none';
     $('view-trees').style.display = (t === 'trees') ? '' : 'none';
+    $('view-dragons').style.display = (t === 'dragons') ? '' : 'none';
+    if (t === 'dragons') renderDragons();
     $('view-labels').classList.toggle('show', t === 'labels');
     if (t === 'labels') loadLabelFrame();
     $('view-editor').style.display = 'none';
@@ -7475,6 +7953,7 @@ async function boot() {
     setStatus('✓ Ready', 'ok');
     setTimeout(() => setStatus('', ''), 2500);
     attachNotebooksListener();
+    attachDragonsListener();
 }
 
 $('btn-refresh').addEventListener('click', boot);
@@ -8263,6 +8742,177 @@ $('set-save').addEventListener('click', () => {
 if ($('setup-room').value && $('setup-name').value) {
     // Don't auto-connect, just pre-fill — give user a chance to switch
 }
+
+// ─── 🐉 Dragons (shared with Persona City module 50) ─────────────────
+// Persona City stores each player's TODO dragons at
+//   rooms/{ROOM}/accountData/{nameKey}/dragonTodos = { todos:[...], lastWriteTime }
+// keyed by the player's NAME, so the same list follows them on any device.
+// This tab reads/writes that exact node. Slaying stays in the game (E key) so
+// the sword / accession kill hooks still fire there.
+const DRAGON_BODY = [0x6a0d1f, 0x4a0e2a, 0x2d1b4e, 0x1f3a1f, 0x3a1f0a, 0x0a2a3a, 0x4a2a0a, 0x2a0d2a];
+const DRAGON_EYE  = [0xffd700, 0xff5511, 0xff00ff, 0x00ffaa, 0xffff00];
+state.dragons = [];
+state.dragonsLoaded = false;
+let _dragonRef = null, _dragonCb = null;
+
+// Must match module 50's getFirebasePath() exactly (NOT sanitize() — spaces etc. are kept)
+function dragonNameKey() {
+    const k = String(state.playerName || '').trim().toLowerCase().replace(/[.#$\[\]\/]/g, '_');
+    return (!k || k === 'player' || k === 'guest') ? '' : k;
+}
+function dragonRefFor() {
+    const k = dragonNameKey();
+    return k ? db.ref(`rooms/${state.room}/accountData/${k}/dragonTodos`) : null;
+}
+// Same shape as module 50's generateVariant() so every device draws the same dragon
+function dragonVariant() {
+    const bodyColor = DRAGON_BODY[(Math.random() * DRAGON_BODY.length) | 0];
+    const eyeColor = DRAGON_EYE[(Math.random() * DRAGON_EYE.length) | 0];
+    const r = (bodyColor >> 16) & 0xff, g = (bodyColor >> 8) & 0xff, b = bodyColor & 0xff;
+    return {
+        scale: 0.78 + Math.random() * 0.7,
+        heightStretch: 0.7 + Math.random() * 0.7,
+        bodyColor, wingColor: ((r >> 1) << 16) | ((g >> 1) << 8) | (b >> 1), eyeColor,
+        spikeCount: 3 + Math.floor(Math.random() * 4),
+        tailSegments: 5 + Math.floor(Math.random() * 3),
+        wingScale: 1.0 + Math.random() * 0.5,
+        hornAngle: -0.6 + Math.random() * 0.5,
+    };
+}
+function dragonTodosOf(val) {
+    if (!val || !val.todos) return [];
+    const arr = Array.isArray(val.todos) ? val.todos : Object.values(val.todos);
+    return arr.filter(t => t && typeof t.text === 'string');
+}
+function attachDragonsListener() {
+    const ref = dragonRefFor();
+    if (_dragonRef && _dragonCb) _dragonRef.off('value', _dragonCb);
+    _dragonRef = ref; _dragonCb = null;
+    if (!ref) { state.dragonsLoaded = true; renderDragons(); return; }
+    _dragonCb = ref.on('value', snap => {
+        state.dragons = dragonTodosOf(snap.val());
+        state.dragonsLoaded = true;
+        renderDragons();
+    }, err => {
+        console.error('[DRAGONS] listen failed:', err);
+        state.dragonsLoaded = true;
+        renderDragons(err.message);
+    });
+}
+// Read-modify-write in a transaction so we never clobber a change made in-game a moment ago
+function mutateDragons(fn) {
+    const ref = dragonRefFor();
+    if (!ref) return Promise.reject(new Error('Set a real player name (not Player/Guest) to use dragons.'));
+    let result;
+    return ref.transaction(cur => {
+        const todos = dragonTodosOf(cur).map(t => Object.assign({}, t));
+        result = fn(todos);
+        return { todos, lastWriteTime: Date.now() };
+    }).then(() => result);
+}
+function cleanDragonLines(text) {
+    return String(text || '').split('\n')
+        .map(l => l.replace(/^\s*(?:[-*•✓]|\d+[.)]|\[[ xX]?\])\s*/, '').trim())
+        .filter(Boolean);
+}
+// Append-only like the game: skips lines already alive; a line matching a SLAIN
+// dragon revives that entry (module 50 respawns it fresh) instead of duplicating it.
+function addDragons(lines) {
+    return mutateDragons(todos => {
+        let added = 0;
+        for (const text of lines) {
+            const hit = todos.find(t => t.text === text);
+            if (hit && !hit.killed) continue;
+            if (hit) { hit.killed = false; hit.killedAt = null; hit.variant = dragonVariant(); }
+            else todos.push({ text, killed: false, killedAt: null, variant: dragonVariant() });
+            added++;
+        }
+        return added;
+    });
+}
+function removeDragon(text) {
+    return mutateDragons(todos => {
+        const i = todos.findIndex(t => t.text === text);
+        if (i >= 0) todos.splice(i, 1);
+        return i >= 0;
+    });
+}
+function clearSlainDragons() {
+    return mutateDragons(todos => {
+        const before = todos.length;
+        for (let i = todos.length - 1; i >= 0; i--) if (todos[i].killed) todos.splice(i, 1);
+        return before - todos.length;
+    });
+}
+function dragonToast(msg, kind) {
+    setStatus(msg, kind || 'ok');
+    setTimeout(() => setStatus('', ''), 2500);
+}
+
+function renderDragons(errMsg) {
+    const list = $('view-dragons');
+    if (!list) return;
+    if (!dragonNameKey()) {
+        list.innerHTML = `<div class="empty">🐉 Dragons follow your Persona City name.<br>Log out (⎋) and sign in with the same name you use in the game.</div>`;
+        return;
+    }
+    if (!state.dragonsLoaded) { list.innerHTML = `<div class="empty">Loading dragons…</div>`; return; }
+    const alive = state.dragons.filter(t => !t.killed);
+    const slain = state.dragons.filter(t => t.killed)
+        .sort((a, b) => (b.killedAt || 0) - (a.killedAt || 0));
+    const row = (t, dead) => `<div class="dragon-item${dead ? ' slain' : ''}">
+            <span class="dragon-ico">${dead ? '🔥' : '🐉'}</span>
+            <span class="dragon-text"><span class="dragon-label">${escapeHtml(t.text)}</span>${dead && t.killedAt ? `<span class="dragon-when">slain ${fmtTime(t.killedAt)}</span>` : ''}</span>
+            <button class="dragon-del" data-text="${escapeHtml(t.text)}" title="Remove">✕</button>
+        </div>`;
+    list.innerHTML = `
+        ${errMsg ? `<div class="empty" style="padding:12px; color:#fca5a5;">⚠️ ${escapeHtml(errMsg)}</div>` : ''}
+        <div class="dragon-add">
+            <textarea id="dragon-add-text" rows="3" placeholder="One task per line — each becomes a dragon roaming the office."></textarea>
+            <button id="dragon-add-btn">➕ Spawn dragons</button>
+            <div class="dragon-hint">Shared with Persona City as <b>${escapeHtml(state.playerName)}</b> in room <b>${escapeHtml(state.room)}</b>. Slay them in-game with <b>E</b>.</div>
+        </div>
+        <div class="dragon-head">🐉 Roaming <span>${alive.length}</span></div>
+        ${alive.length ? alive.map(t => row(t, false)).join('') : `<div class="empty" style="padding:16px;">No dragons roaming. Add some above.</div>`}
+        ${slain.length ? `<div class="dragon-head">🔥 Slain <span>${slain.length}</span>
+            <button id="dragon-clear-slain" class="dragon-clear">Clear slain</button></div>
+            ${slain.map(t => row(t, true)).join('')}` : ''}
+    `;
+    $('dragon-add-btn').addEventListener('click', async () => {
+        const lines = cleanDragonLines($('dragon-add-text').value);
+        if (!lines.length) return;
+        try {
+            const n = await addDragons(lines);
+            dragonToast(n ? `🐉 +${n} dragon${n === 1 ? '' : 's'} spawned` : 'No new dragons (already roaming)');
+            if (n) $('dragon-add-text').value = '';
+        } catch (e) { dragonToast('⚠️ ' + e.message, 'err'); }
+    });
+    const clr = $('dragon-clear-slain');
+    if (clr) clr.addEventListener('click', async () => {
+        if (!confirm('Remove all slain dragons from the list?')) return;
+        try { await clearSlainDragons(); } catch (e) { dragonToast('⚠️ ' + e.message, 'err'); }
+    });
+    list.querySelectorAll('.dragon-del').forEach(btn => btn.addEventListener('click', async () => {
+        const text = btn.dataset.text;
+        if (!confirm('Remove this dragon?\n\n' + text)) return;
+        try { await removeDragon(text); } catch (e) { dragonToast('⚠️ ' + e.message, 'err'); }
+    }));
+}
+
+// Editor 🐉 button: selected lines (or the whole current page) → dragons
+$('btn-dragons').addEventListener('click', async () => {
+    const ta = $('editor-text');
+    const sel = ta.value.slice(ta.selectionStart, ta.selectionEnd);
+    const lines = cleanDragonLines(sel || ta.value);
+    if (!lines.length) { dragonToast('Nothing to turn into dragons', 'err'); return; }
+    const what = sel ? 'selected' : 'on this page';
+    if (!confirm(`Spawn ${lines.length} dragon${lines.length === 1 ? '' : 's'} from the lines ${what}?\n\n` +
+        lines.slice(0, 8).map(l => '• ' + l).join('\n') + (lines.length > 8 ? `\n…and ${lines.length - 8} more` : ''))) return;
+    try {
+        const n = await addDragons(lines);
+        dragonToast(n ? `🐉 +${n} dragon${n === 1 ? '' : 's'} spawned in Persona City` : 'No new dragons (already roaming)');
+    } catch (e) { dragonToast('⚠️ ' + e.message, 'err'); }
+});
 
 </script>
 
