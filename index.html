@@ -303,6 +303,123 @@
     width: 100%; height: 100%;
     border: none; display: block;
   }
+
+  /* ── Quick phrase dock ── */
+  .editor-textarea { tab-size: 14; -moz-tab-size: 14; }
+  #qp-dock {
+    display: none; flex-shrink: 0;
+    background: var(--panel); border-top: 1px solid var(--border);
+    padding: 6px 10px max(8px, env(safe-area-inset-bottom));
+  }
+  #qp-dock.show { display: block; }
+  .qp-bar { display: flex; align-items: center; gap: 6px; }
+  .qp-title { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; flex: 1; cursor: pointer; user-select: none; }
+  .qp-tool {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 8px; padding: 6px 10px; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap;
+  }
+  .qp-tool.now { background: #0e7490; border-color: #0e7490; color: #fff; }
+  .qp-tool:active { transform: scale(.96); }
+  .qp-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+    gap: 6px; margin-top: 6px; max-height: 128px; overflow-y: auto;
+  }
+  #qp-dock.collapsed .qp-grid { display: none; }
+  .qp-btn {
+    background: var(--bg); color: var(--text); border: 1px solid rgba(96,165,250,.35);
+    border-radius: 8px; padding: 9px 8px; font-size: 13px; cursor: pointer; text-align: left;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; user-select: none; -webkit-user-select: none;
+    -webkit-touch-callout: none;
+  }
+  .qp-btn:active { background: var(--accent-strong); }
+  .qp-btn .qp-k { color: var(--accent); font-weight: 700; margin-right: 4px; font-size: 11px; }
+  .qp-empty { grid-column: 1 / -1; color: var(--muted); font-size: 12px; padding: 6px 2px; }
+  #qp-toast {
+    position: fixed; left: 50%; bottom: 190px; transform: translateX(-50%);
+    background: #111827; color: #fff; border: 1px solid var(--accent); border-radius: 999px;
+    padding: 8px 16px; font-size: 13px; z-index: 400; white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity .2s;
+  }
+  #qp-toast.show { opacity: 1; }
+
+  /* Shared big sheet (phrase editor + table) */
+  .big-scrim {
+    display: none; position: fixed; inset: 0; z-index: 320;
+    background: rgba(0,0,0,.6); align-items: stretch; justify-content: center;
+  }
+  .big-scrim.active { display: flex; }
+  .big-sheet {
+    width: 100%; max-width: 760px; background: var(--panel); display: flex; flex-direction: column;
+    border-left: 1px solid var(--border); border-right: 1px solid var(--border);
+  }
+  @media (min-width: 800px) { .big-scrim { padding: 24px; } .big-sheet { border-radius: 14px; border: 1px solid var(--border); } }
+  .big-head {
+    display: flex; align-items: center; gap: 8px; padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .big-head h3 { margin: 0; font-size: 16px; flex: 1; }
+  .big-body { flex: 1; overflow: auto; padding: 12px 14px; -webkit-overflow-scrolling: touch; }
+  .big-foot { display: flex; gap: 8px; flex-wrap: wrap; padding: 10px 14px max(10px, env(safe-area-inset-bottom)); border-top: 1px solid var(--border); }
+  .big-btn {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 14px; font-size: 14px; font-weight: 600; cursor: pointer;
+  }
+  .big-btn { width: auto; flex: 0 0 auto; }
+  .big-foot .big-btn.go { flex: 1 1 auto; }
+  .big-btn.go { background: var(--accent-strong); border-color: var(--accent-strong); color: #fff; }
+  .big-btn:disabled { opacity: .4; cursor: default; }
+  .big-hint { color: var(--muted); font-size: 12px; line-height: 1.55; margin: 0 0 12px; }
+  .big-hint code { background: var(--bg); padding: 1px 5px; border-radius: 4px; color: var(--accent); }
+
+  /* Phrase editor rows */
+  .qpe-row {
+    display: flex; gap: 10px; align-items: flex-start;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+    padding: 10px; margin-bottom: 8px;
+  }
+  .qpe-row.flash { outline: 2px solid var(--accent); }
+  .qpe-num { color: var(--accent); font-weight: 700; font-size: 13px; width: 20px; padding-top: 9px; text-align: center; }
+  .qpe-fields { flex: 1; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .qpe-fields input, .qpe-fields textarea {
+    width: 100%; box-sizing: border-box; background: var(--panel); color: var(--text);
+    border: 1px solid var(--border); border-radius: 7px; padding: 8px 10px; font-size: 14px; font-family: inherit;
+  }
+  .qpe-fields input { font-size: 12px; color: var(--muted); }
+  .qpe-fields textarea { resize: none; overflow: hidden; min-height: 38px; line-height: 1.4; }
+  .qpe-fields input:focus, .qpe-fields textarea:focus { outline: 2px solid var(--accent); color: var(--text); }
+  .qpe-side { display: flex; flex-direction: column; gap: 4px; }
+  .qpe-side button {
+    width: 34px; height: 30px; border-radius: 6px; cursor: pointer;
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--border); font-size: 13px;
+  }
+  .qpe-side button.del:hover { background: var(--red); }
+  .qpe-side button:disabled { opacity: .3; }
+  .qpe-saved { font-size: 11px; color: var(--green); min-width: 50px; text-align: right; }
+
+  /* Table editor */
+  .tbl-wrap { overflow: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
+  table.tbl { border-collapse: collapse; min-width: 100%; }
+  table.tbl th {
+    background: var(--panel-2); color: var(--muted); font-size: 11px; font-weight: 600;
+    padding: 4px; position: sticky; top: 0; z-index: 1; min-width: 26px;
+  }
+  table.tbl th.rh { position: sticky; left: 0; z-index: 2; }
+  table.tbl td.rh {
+    background: var(--panel-2); color: var(--muted); font-size: 11px; text-align: center;
+    position: sticky; left: 0; padding: 0 6px;
+  }
+  table.tbl td { border: 1px solid var(--border); padding: 0; }
+  table.tbl input {
+    width: 100%; min-width: 120px; box-sizing: border-box; border: none; background: transparent;
+    color: var(--text); padding: 9px 8px; font-size: 14px; font-family: inherit;
+  }
+  table.tbl input:focus { outline: 2px solid var(--accent); outline-offset: -2px; background: var(--panel); }
+  table.tbl tr.hdr input { font-weight: 700; }
+  .tbl-tools { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+  .tbl-tools button {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 7px; padding: 7px 10px; font-size: 12px; cursor: pointer;
+  }
+
   #view-labels { flex:1; min-height:0; display:none; }
   #view-labels.show { display:flex; }
   #label-frame { flex:1; width:100%; height:100%; border:0; display:block; }
@@ -435,8 +552,70 @@
     </div>
   </div>
   
+
+  <!-- ⚡ Quick phrase dock (SOPs / Notebooks / Dragons) -->
+  <div id="qp-dock">
+    <div class="qp-bar">
+      <span class="qp-title" id="qp-title" title="Show / hide the phrase grid">⚡ Quick phrases ▾</span>
+      <button class="qp-tool now" id="qp-now" title="Insert current date &amp; time">🕒 Now</button>
+      <button class="qp-tool" id="qp-table" title="Multi-column table you can paste into Excel">📊 Table</button>
+      <button class="qp-tool" id="qp-edit" title="Edit phrases">✏️ Edit</button>
+    </div>
+    <div class="qp-grid" id="qp-grid"></div>
+  </div>
+
   <button class="fab" id="fab-new" style="display:none;">＋</button>
 </div>
+
+
+<!-- Quick phrase editor -->
+<div class="big-scrim" id="qpe-scrim">
+  <div class="big-sheet">
+    <div class="big-head">
+      <h3>✏️ Quick phrases</h3>
+      <span class="qpe-saved" id="qpe-saved"></span>
+      <button class="big-btn go" id="qpe-done">Done</button>
+    </div>
+    <div class="big-body">
+      <p class="big-hint">Each box is one button. Type the text it should fill in; the short name is optional (it's what shows on the button). Changes save as you type and follow your name to any device.<br>
+      Fill-ins you can use inside a phrase: <code>{now}</code> 03/14/2026 02:05 PM · <code>{date}</code> 03/14/2026 · <code>{time}</code> 02:05 PM · <code>{tab}</code> next column · <code>{name}</code> your name.<br>
+      Tip: long-press (or right-click) any button in the grid to jump straight to it here.</p>
+      <div id="qpe-list"></div>
+      <button class="big-btn" id="qpe-add" style="width:100%; margin-top:4px;">＋ Add phrase</button>
+    </div>
+    <div class="big-foot">
+      <button class="big-btn" id="qpe-reset">Restore starter phrases</button>
+    </div>
+  </div>
+</div>
+
+<!-- Multi-column table (Excel-friendly) -->
+<div class="big-scrim" id="tbl-scrim">
+  <div class="big-sheet">
+    <div class="big-head">
+      <h3>📊 Table</h3>
+      <button class="big-btn" id="tbl-close">Close</button>
+    </div>
+    <div class="big-body">
+      <p class="big-hint"><b>Tab</b> = next column · <b>Enter</b> = next row · ↑ ↓ move rows. Paste cells from Excel straight into any box. <b>Copy for Excel</b> then Ctrl+V in Excel lands each box in its own cell. Your table is kept until you clear it.</p>
+      <div class="tbl-tools">
+        <button id="tbl-addrow">＋ Row</button>
+        <button id="tbl-addcol">＋ Column</button>
+        <button id="tbl-delrow">− Last row</button>
+        <button id="tbl-delcol">− Last column</button>
+        <button id="tbl-now">🕒 Now in cell</button>
+        <button id="tbl-hdr">Bold first row</button>
+        <button id="tbl-clear">🗑 Clear</button>
+      </div>
+      <div class="tbl-wrap"><table class="tbl" id="tbl"></table></div>
+    </div>
+    <div class="big-foot">
+      <button class="big-btn go" id="tbl-copy">📋 Copy for Excel</button>
+      <button class="big-btn" id="tbl-insert">⬇ Put in note</button>
+    </div>
+  </div>
+</div>
+<div id="qp-toast"></div>
 
 <!-- Decision-tree builder overlay (hosts the Branchwork editor in an iframe) -->
 <div id="tree-builder">
@@ -7929,6 +8108,7 @@ function switchTab(t) {
     $('topbar-list').style.display = '';
     $('topbar-editor').style.display = 'none';
     $('fab-new').style.display = (t === 'notebooks' || t === 'trees') ? '' : 'none';
+    if (typeof qpRefreshDock === 'function') qpRefreshDock();
 }
 
 // Lazily load the label/printer tools into the isolated iframe (mirrors openBuilder).
@@ -7954,6 +8134,7 @@ async function boot() {
     setTimeout(() => setStatus('', ''), 2500);
     attachNotebooksListener();
     attachDragonsListener();
+    attachQuickPhrases();
 }
 
 $('btn-refresh').addEventListener('click', boot);
@@ -8857,6 +9038,8 @@ function renderDragons(errMsg) {
         return;
     }
     if (!state.dragonsLoaded) { list.innerHTML = `<div class="empty">Loading dragons…</div>`; return; }
+    const prevDraft = $('dragon-add-text') ? $('dragon-add-text').value : '';
+    const hadFocus = document.activeElement && document.activeElement.id === 'dragon-add-text';
     const alive = state.dragons.filter(t => !t.killed);
     const slain = state.dragons.filter(t => t.killed)
         .sort((a, b) => (b.killedAt || 0) - (a.killedAt || 0));
@@ -8878,6 +9061,8 @@ function renderDragons(errMsg) {
             <button id="dragon-clear-slain" class="dragon-clear">Clear slain</button></div>
             ${slain.map(t => row(t, true)).join('')}` : ''}
     `;
+    if (prevDraft) $('dragon-add-text').value = prevDraft;
+    if (hadFocus) { const ta = $('dragon-add-text'); ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
     $('dragon-add-btn').addEventListener('click', async () => {
         const lines = cleanDragonLines($('dragon-add-text').value);
         if (!lines.length) return;
@@ -8913,6 +9098,433 @@ $('btn-dragons').addEventListener('click', async () => {
         dragonToast(n ? `🐉 +${n} dragon${n === 1 ? '' : 's'} spawned in Persona City` : 'No new dragons (already roaming)');
     } catch (e) { dragonToast('⚠️ ' + e.message, 'err'); }
 });
+
+// ─── ⚡ Quick phrases + 🕒 timestamp + 📊 Excel table ──────────────────
+// Phrases live at rooms/{ROOM}/labNotebookPrefs/{sanitizedName}/quickPhrases
+// (cached in localStorage) so the grid follows the user to any device.
+const QP_LS = 'labNotebook.quickPhrases';
+const QP_COLLAPSE_LS = 'labNotebook.qpCollapsed';
+const TBL_LS = 'labNotebook.tableDraft';
+const QP_STARTERS = [
+    { label: 'Received', text: 'Sample received {now}' },
+    { label: 'Called – VM', text: 'Called client, left voicemail {now}' },
+    { label: 'Emailed', text: 'Emailed client for missing info {now}' },
+    { label: 'On hold', text: 'ON HOLD – ' },
+    { label: 'Resolved', text: 'Resolved ✓ {now}' },
+    { label: 'Follow up', text: 'Follow up tomorrow – ' },
+];
+let qp = { items: [], updatedAt: 0, ref: null, cb: null, lastWrite: 0, saveTimer: null };
+let qpTarget = null;                 // last text field the user was typing in
+const qpSel = new WeakMap();         // remembered caret per field
+
+function qpId() { return 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+function qpPad(n) { return String(n).padStart(2, '0'); }
+function qpDate(d) { d = d || new Date(); return `${qpPad(d.getMonth() + 1)}/${qpPad(d.getDate())}/${d.getFullYear()}`; }
+function qpTime(d) {
+    d = d || new Date();
+    const h = d.getHours() % 12 || 12;
+    return `${qpPad(h)}:${qpPad(d.getMinutes())} ${d.getHours() < 12 ? 'AM' : 'PM'}`;
+}
+function qpNow() { const d = new Date(); return qpDate(d) + ' ' + qpTime(d); }
+function qpExpand(text) {
+    const d = new Date();
+    return String(text || '')
+        .replace(/\{now\}/gi, qpDate(d) + ' ' + qpTime(d))
+        .replace(/\{date\}/gi, qpDate(d))
+        .replace(/\{time\}/gi, qpTime(d))
+        .replace(/\{tab\}/gi, '\t')
+        .replace(/\{name\}/gi, state.playerName || '');
+}
+function qpToast(msg) {
+    const t = $('qp-toast');
+    t.textContent = msg; t.classList.add('show');
+    clearTimeout(qpToast._t); qpToast._t = setTimeout(() => t.classList.remove('show'), 1600);
+}
+async function qpCopy(text) {
+    try { await navigator.clipboard.writeText(text); return true; } catch (e) {}
+    try {
+        const ta = document.createElement('textarea');
+        ta.value = text; ta.style.cssText = 'position:fixed;left:-9999px;top:0;';
+        document.body.appendChild(ta); ta.select();
+        const ok = document.execCommand('copy'); ta.remove(); return ok;
+    } catch (e) { return false; }
+}
+
+// ── Where does a tap go? ──
+function qpIsField(el) {
+    return el && (el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && /^(text|search|)$/i.test(el.type)))
+        && $('app').contains(el) && !$('qp-dock').contains(el);
+}
+document.addEventListener('focusin', e => { if (qpIsField(e.target)) qpTarget = e.target; });
+['keyup', 'mouseup', 'input', 'select', 'blur', 'touchend'].forEach(ev =>
+    document.addEventListener(ev, e => {
+        const el = e.target;
+        if (qpIsField(el)) qpSel.set(el, [el.selectionStart, el.selectionEnd]);
+    }, true));
+
+function qpResolveTarget() {
+    const editorOpen = $('view-editor').style.display !== 'none';
+    if (editorOpen) {
+        if (qpTarget && qpTarget.isConnected && ($('view-editor').contains(qpTarget) || qpTarget === $('editor-title'))) return qpTarget;
+        return $('editor-text');
+    }
+    if (state.tab === 'dragons') return $('dragon-add-text');
+    return null;
+}
+function qpInsertInto(el, text) {
+    const saved = qpSel.get(el);
+    const len = el.value.length;
+    let s = document.activeElement === el ? el.selectionStart : (saved ? saved[0] : len);
+    let e = document.activeElement === el ? el.selectionEnd : (saved ? saved[1] : len);
+    s = Math.min(s, len); e = Math.min(e, len);
+    // single-line inputs can't hold tabs/newlines
+    if (el.tagName === 'INPUT') text = text.replace(/[\t\r\n]+/g, ' ');
+    // dragons: one phrase per line
+    if (el.id === 'dragon-add-text' && s === e && s > 0 && el.value[s - 1] !== '\n') text = '\n' + text;
+    // don't glue words together: "Box 4" + "Sample…" → "Box 4 Sample…"
+    else if (s > 0 && /\S/.test(el.value[s - 1]) && /^\S/.test(text)) text = ' ' + text;
+    el.focus();
+    el.setRangeText(text, s, e, 'end');
+    qpSel.set(el, [el.selectionStart, el.selectionEnd]);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+}
+async function qpUse(text) {
+    const out = qpExpand(text);
+    const el = qpResolveTarget();
+    if (el) { qpInsertInto(el, out); return; }
+    qpToast((await qpCopy(out)) ? '📋 Copied — paste anywhere' : '⚠️ Copy blocked by browser');
+}
+
+// ── Dock rendering ──
+function qpRenderGrid() {
+    const g = $('qp-grid');
+    if (!qp.items.length) {
+        g.innerHTML = `<div class="qp-empty">No phrases yet — tap ✏️ Edit to add some.</div>`;
+        return;
+    }
+    g.innerHTML = qp.items.map((it, i) => {
+        const label = (it.label || '').trim() || (it.text || '').trim() || '(empty)';
+        return `<button class="qp-btn" data-i="${i}" title="${escapeHtml(qpExpand(it.text))}"><span class="qp-k">${i + 1}</span>${escapeHtml(label)}</button>`;
+    }).join('');
+}
+function qpRefreshDock() {
+    const editorOpen = $('view-editor').style.display !== 'none';
+    const show = editorOpen || ['sops', 'notebooks', 'dragons'].includes(state.tab);
+    $('qp-dock').classList.toggle('show', show && $('app').classList.contains('active'));
+    let collapsed = false;
+    try { collapsed = localStorage.getItem(QP_COLLAPSE_LS) === '1'; } catch (e) {}
+    $('qp-dock').classList.toggle('collapsed', collapsed);
+    $('qp-title').textContent = '⚡ Quick phrases ' + (collapsed ? '▸' : '▾');
+    // keep the ＋ button above the dock
+    const h = $('qp-dock').classList.contains('show') ? $('qp-dock').offsetHeight : 0;
+    $('fab-new').style.bottom = (16 + h) + 'px';
+}
+$('qp-title').addEventListener('click', () => {
+    const c = !$('qp-dock').classList.contains('collapsed');
+    try { localStorage.setItem(QP_COLLAPSE_LS, c ? '1' : '0'); } catch (e) {}
+    qpRefreshDock();
+});
+// keep the caret in the note on desktop when clicking dock buttons
+$('qp-dock').addEventListener('mousedown', e => { if (e.target.closest('button')) e.preventDefault(); });
+let qpPress = null;
+$('qp-grid').addEventListener('pointerdown', e => {
+    const b = e.target.closest('.qp-btn'); if (!b) return;
+    clearTimeout(qpPress && qpPress.t);
+    qpPress = { i: +b.dataset.i, long: false, t: setTimeout(() => { qpPress.long = true; qpOpenEditor(+b.dataset.i); }, 550) };
+});
+['pointerup', 'pointerleave', 'pointercancel'].forEach(ev =>
+    $('qp-grid').addEventListener(ev, () => { if (qpPress) clearTimeout(qpPress.t); }));
+$('qp-grid').addEventListener('click', e => {
+    const b = e.target.closest('.qp-btn'); if (!b) return;
+    if (qpPress && qpPress.long) { qpPress = null; return; }
+    const it = qp.items[+b.dataset.i];
+    if (it) qpUse(it.text);
+});
+$('qp-grid').addEventListener('contextmenu', e => {
+    const b = e.target.closest('.qp-btn'); if (!b) return;
+    e.preventDefault(); qpOpenEditor(+b.dataset.i);
+});
+$('qp-now').addEventListener('click', () => qpUse('{now}'));
+$('qp-edit').addEventListener('click', () => qpOpenEditor());
+// Number keys while holding Alt fire phrases 1–9 (desktop shortcut)
+document.addEventListener('keydown', e => {
+    if (!e.altKey || e.ctrlKey || e.metaKey || !$('qp-dock').classList.contains('show')) return;
+    const n = parseInt(e.key, 10);
+    if (n >= 1 && n <= 9 && qp.items[n - 1]) { e.preventDefault(); qpUse(qp.items[n - 1].text); }
+    if (e.key === '0') { e.preventDefault(); qpUse('{now}'); }
+});
+
+// ── Storage / sync ──
+function qpNormalize(v) {
+    const arr = v && v.items ? (Array.isArray(v.items) ? v.items : Object.values(v.items)) : null;
+    return arr ? arr.filter(Boolean).map(x => ({ id: x.id || qpId(), label: x.label || '', text: x.text || '' })) : null;
+}
+function qpLoadLocal() {
+    try { const v = JSON.parse(localStorage.getItem(QP_LS) || 'null'); return v && qpNormalize(v) ? { items: qpNormalize(v), updatedAt: v.updatedAt || 0 } : null; }
+    catch (e) { return null; }
+}
+function qpSaveLocal() { try { localStorage.setItem(QP_LS, JSON.stringify({ items: qp.items, updatedAt: qp.updatedAt })); } catch (e) {} }
+function qpPersist() {
+    qp.updatedAt = Date.now();
+    qpSaveLocal();
+    qpRenderGrid(); qpRefreshDock();
+    clearTimeout(qp.saveTimer);
+    $('qpe-saved').textContent = '…';
+    qp.saveTimer = setTimeout(() => {
+        qp.lastWrite = Date.now();
+        const done = () => { $('qpe-saved').textContent = '✓ Saved'; };
+        if (!qp.ref) { done(); return; }
+        qp.ref.set({ items: qp.items, updatedAt: qp.updatedAt }).then(done)
+            .catch(e => { $('qpe-saved').textContent = '⚠️ offline'; console.warn('[QP] save', e); });
+    }, 500);
+}
+function attachQuickPhrases() {
+    const local = qpLoadLocal();
+    if (!qp.items.length) {
+        qp.items = local ? local.items : QP_STARTERS.map(s => ({ id: qpId(), label: s.label, text: s.text }));
+        qp.updatedAt = local ? local.updatedAt : 0;
+    }
+    qpRenderGrid(); qpRefreshDock();
+    if (qp.ref && qp.cb) qp.ref.off('value', qp.cb);
+    if (!state.room || !state.sanitizedName) return;
+    qp.ref = db.ref(`rooms/${state.room}/labNotebookPrefs/${state.sanitizedName}/quickPhrases`);
+    qp.cb = qp.ref.on('value', snap => {
+        const v = snap.val();
+        const items = qpNormalize(v);
+        if (!items) {                       // nothing in the cloud yet → upload what we have
+            if (qp.items.length) { qp.lastWrite = Date.now(); qp.ref.set({ items: qp.items, updatedAt: qp.updatedAt || Date.now() }).catch(() => {}); }
+            return;
+        }
+        if (Date.now() - qp.lastWrite < 1500) return;                     // our own echo
+        if ($('qpe-scrim').classList.contains('active')) return;          // don't yank boxes while editing
+        if ((v.updatedAt || 0) < qp.updatedAt) return;
+        qp.items = items; qp.updatedAt = v.updatedAt || 0;
+        qpSaveLocal(); qpRenderGrid(); qpRefreshDock();
+    }, err => console.warn('[QP] listen', err));
+}
+
+// ── Phrase editor ──
+function qpAutoGrow(ta) { ta.style.height = 'auto'; ta.style.height = (ta.scrollHeight + 2) + 'px'; }
+function qpRenderEditor(focusIdx) {
+    const list = $('qpe-list');
+    list.innerHTML = qp.items.map((it, i) => `
+        <div class="qpe-row" data-i="${i}">
+            <div class="qpe-num">${i + 1}</div>
+            <div class="qpe-fields">
+                <textarea rows="1" data-f="text" placeholder="Text this button fills in…">${escapeHtml(it.text)}</textarea>
+                <input type="text" data-f="label" placeholder="Button name (optional — uses the text if blank)" value="${escapeHtml(it.label)}">
+            </div>
+            <div class="qpe-side">
+                <button data-a="up" title="Move up" ${i === 0 ? 'disabled' : ''}>▲</button>
+                <button data-a="down" title="Move down" ${i === qp.items.length - 1 ? 'disabled' : ''}>▼</button>
+                <button data-a="del" class="del" title="Delete">🗑</button>
+            </div>
+        </div>`).join('') || `<div class="empty" style="padding:20px;">No phrases. Tap ＋ Add phrase.</div>`;
+    list.querySelectorAll('textarea').forEach(qpAutoGrow);
+    if (focusIdx != null) {
+        const row = list.querySelector(`.qpe-row[data-i="${focusIdx}"]`);
+        if (row) {
+            row.scrollIntoView({ block: 'center' });
+            row.classList.add('flash'); setTimeout(() => row.classList.remove('flash'), 1200);
+            const ta = row.querySelector('textarea'); ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length);
+        }
+    }
+}
+$('qpe-list').addEventListener('input', e => {
+    const f = e.target.dataset.f; if (!f) return;
+    const i = +e.target.closest('.qpe-row').dataset.i;
+    qp.items[i][f] = e.target.value;
+    if (e.target.tagName === 'TEXTAREA') qpAutoGrow(e.target);
+    qpPersist();
+});
+$('qpe-list').addEventListener('click', e => {
+    const a = e.target.dataset.a; if (!a) return;
+    const i = +e.target.closest('.qpe-row').dataset.i;
+    if (a === 'del') {
+        const it = qp.items[i];
+        if ((it.text || it.label) && !confirm('Delete this phrase?\n\n' + (it.label || it.text))) return;
+        qp.items.splice(i, 1);
+    } else {
+        const j = a === 'up' ? i - 1 : i + 1;
+        if (j < 0 || j >= qp.items.length) return;
+        [qp.items[i], qp.items[j]] = [qp.items[j], qp.items[i]];
+    }
+    qpPersist(); qpRenderEditor();
+});
+$('qpe-add').addEventListener('click', () => {
+    qp.items.push({ id: qpId(), label: '', text: '' });
+    qpPersist(); qpRenderEditor(qp.items.length - 1);
+});
+$('qpe-reset').addEventListener('click', () => {
+    if (!confirm('Add the starter phrases back? (Your own phrases are kept.)')) return;
+    QP_STARTERS.forEach(s => { if (!qp.items.some(x => x.text === s.text)) qp.items.push({ id: qpId(), label: s.label, text: s.text }); });
+    qpPersist(); qpRenderEditor();
+});
+function qpOpenEditor(idx) {
+    $('qpe-saved').textContent = '';
+    $('qpe-scrim').classList.add('active');
+    qpRenderEditor(idx);
+}
+function qpCloseEditor() {
+    // drop rows left completely empty
+    const before = qp.items.length;
+    qp.items = qp.items.filter(x => (x.text || '').trim() || (x.label || '').trim());
+    if (qp.items.length !== before) qpPersist();
+    $('qpe-scrim').classList.remove('active');
+    qpRenderGrid(); qpRefreshDock();
+}
+$('qpe-done').addEventListener('click', qpCloseEditor);
+$('qpe-scrim').addEventListener('click', e => { if (e.target.id === 'qpe-scrim') qpCloseEditor(); });
+
+// ── 📊 Excel-friendly table ──
+let tbl = { rows: [['', '', ''], ['', '', ''], ['', '', ''], ['', '', '']], hdr: true };
+let tblFrom = null;   // {el, s, e} — where "Put in note" goes
+function tblSaveDraft() { try { localStorage.setItem(TBL_LS, JSON.stringify(tbl)); } catch (e) {} }
+function tblLoadDraft() {
+    try { const v = JSON.parse(localStorage.getItem(TBL_LS) || 'null'); if (v && Array.isArray(v.rows) && v.rows.length) tbl = v; } catch (e) {}
+}
+function tblCols() { return Math.max(1, ...tbl.rows.map(r => r.length)); }
+function tblSquare() { const c = tblCols(); tbl.rows.forEach(r => { while (r.length < c) r.push(''); }); }
+function tblParse(text) {
+    const lines = String(text).replace(/\r/g, '').split('\n');
+    while (lines.length > 1 && lines[lines.length - 1] === '') lines.pop();
+    return lines.map(l => l.split('\t'));
+}
+function tblColName(i) { let s = ''; i++; while (i > 0) { const m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); } return s; }
+function tblRender(fr, fc) {
+    tblSquare();
+    const c = tblCols();
+    let h = '<tr><th class="rh"></th>';
+    for (let j = 0; j < c; j++) h += `<th>${tblColName(j)}</th>`;
+    h += '</tr>';
+    tbl.rows.forEach((r, i) => {
+        h += `<tr class="${i === 0 && tbl.hdr ? 'hdr' : ''}"><td class="rh">${i + 1}</td>`;
+        r.forEach((v, j) => { h += `<td><input data-r="${i}" data-c="${j}" value="${escapeHtml(v)}"></td>`; });
+        h += '</tr>';
+    });
+    $('tbl').innerHTML = h;
+    if (fr != null) tblFocus(fr, fc);
+}
+function tblFocus(r, c) {
+    const el = $('tbl').querySelector(`input[data-r="${r}"][data-c="${c}"]`);
+    if (el) { el.focus(); el.select(); }
+}
+function tblExport() {
+    const rows = tbl.rows.map(r => r.map(v => String(v || '').replace(/[\t\r\n]+/g, ' ')));
+    while (rows.length && rows[rows.length - 1].every(v => !v.trim())) rows.pop();
+    let lastCol = -1;
+    rows.forEach(r => r.forEach((v, j) => { if (v.trim()) lastCol = Math.max(lastCol, j); }));
+    return rows.map(r => r.slice(0, lastCol + 1).join('\t')).join('\n');
+}
+$('tbl').addEventListener('input', e => {
+    const r = +e.target.dataset.r, c = +e.target.dataset.c;
+    if (isNaN(r)) return;
+    tbl.rows[r][c] = e.target.value; tblSaveDraft();
+});
+$('tbl').addEventListener('paste', e => {
+    const t = (e.clipboardData || window.clipboardData).getData('text');
+    if (!/[\t\n]/.test(t.replace(/\n$/, ''))) return;     // single value → normal paste
+    e.preventDefault();
+    const r0 = +e.target.dataset.r, c0 = +e.target.dataset.c;
+    tblParse(t).forEach((row, i) => {
+        while (tbl.rows.length <= r0 + i) tbl.rows.push([]);
+        row.forEach((v, j) => {
+            const R = tbl.rows[r0 + i];
+            while (R.length <= c0 + j) R.push('');
+            R[c0 + j] = v;
+        });
+    });
+    tblSaveDraft(); tblRender(r0, c0);
+});
+$('tbl').addEventListener('keydown', e => {
+    const r = +e.target.dataset.r, c = +e.target.dataset.c;
+    if (isNaN(r)) return;
+    const last = tbl.rows.length - 1, lastC = tblCols() - 1;
+    if (e.key === 'Enter' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (r === last) { if (e.key !== 'Enter') return; tbl.rows.push(Array(tblCols()).fill('')); tblSaveDraft(); tblRender(r + 1, c); }
+        else tblFocus(r + 1, c);
+    } else if (e.key === 'ArrowUp') {
+        e.preventDefault(); if (r > 0) tblFocus(r - 1, c);
+    } else if (e.key === 'Tab' && !e.shiftKey && r === last && c === lastC) {
+        e.preventDefault(); tbl.rows.push(Array(tblCols()).fill('')); tblSaveDraft(); tblRender(r + 1, 0);
+    }
+});
+$('tbl').addEventListener('focusin', e => { if (e.target.dataset.r != null) tbl._f = [+e.target.dataset.r, +e.target.dataset.c]; });
+$('tbl-addrow').addEventListener('click', () => { tbl.rows.push(Array(tblCols()).fill('')); tblSaveDraft(); tblRender(tbl.rows.length - 1, 0); });
+$('tbl-addcol').addEventListener('click', () => { tbl.rows.forEach(r => r.push('')); tblSaveDraft(); tblRender(0, tblCols() - 1); });
+$('tbl-delrow').addEventListener('click', () => {
+    if (tbl.rows.length <= 1) return;
+    const r = tbl.rows[tbl.rows.length - 1];
+    if (r.some(v => v.trim()) && !confirm('Last row has text. Remove it?')) return;
+    tbl.rows.pop(); tblSaveDraft(); tblRender();
+});
+$('tbl-delcol').addEventListener('click', () => {
+    if (tblCols() <= 1) return;
+    if (tbl.rows.some(r => (r[r.length - 1] || '').trim()) && !confirm('Last column has text. Remove it?')) return;
+    tbl.rows.forEach(r => r.pop()); tblSaveDraft(); tblRender();
+});
+$('tbl-now').addEventListener('click', () => {
+    const [r, c] = tbl._f || [0, 0];
+    tbl.rows[r][c] = (tbl.rows[r][c] ? tbl.rows[r][c] + ' ' : '') + qpNow();
+    tblSaveDraft(); tblRender(r, c);
+});
+$('tbl-hdr').addEventListener('click', () => { tbl.hdr = !tbl.hdr; tblSaveDraft(); tblRender(); });
+$('tbl-clear').addEventListener('click', () => {
+    if (!confirm('Clear the whole table?')) return;
+    tbl = { rows: [['', '', ''], ['', '', ''], ['', '', ''], ['', '', '']], hdr: tbl.hdr };
+    tblSaveDraft(); tblRender(0, 0);
+});
+// keep the cell focused when tapping toolbar buttons on desktop
+document.querySelector('#tbl-scrim .tbl-tools').addEventListener('mousedown', e => { if (e.target.closest('button')) e.preventDefault(); });
+$('tbl-copy').addEventListener('click', async () => {
+    const t = tblExport();
+    if (!t) { qpToast('Table is empty'); return; }
+    qpToast((await qpCopy(t)) ? '📋 Copied — Ctrl+V into Excel' : '⚠️ Copy blocked by browser');
+});
+$('tbl-insert').addEventListener('click', () => {
+    const t = tblExport();
+    if (!t || !tblFrom) return;
+    const el = tblFrom.el;
+    qpSel.set(el, [tblFrom.s, tblFrom.e]);
+    $('tbl-scrim').classList.remove('active');
+    const before = tblFrom.s > 0 && el.value[tblFrom.s - 1] !== '\n' ? '\n' : '';
+    const after = el.value[tblFrom.e] === '\n' ? '' : '\n';
+    qpInsertInto(el, before + t + after);
+    qpToast('⬇ Table added to note');
+});
+$('tbl-close').addEventListener('click', () => $('tbl-scrim').classList.remove('active'));
+$('qp-table').addEventListener('click', () => {
+    const el = qpResolveTarget();
+    tblFrom = null;
+    if (el && el.tagName === 'TEXTAREA' && el.id === 'editor-text') {
+        const sv = qpSel.get(el) || [el.value.length, el.value.length];
+        const s = document.activeElement === el ? el.selectionStart : sv[0];
+        const e2 = document.activeElement === el ? el.selectionEnd : sv[1];
+        tblFrom = { el, s, e: e2 };
+        const sel = el.value.slice(s, e2);
+        if (sel.includes('\t')) { tbl = { rows: tblParse(sel), hdr: tbl.hdr }; tblSaveDraft(); }
+        else tblLoadDraft();
+    } else tblLoadDraft();
+    $('tbl-insert').disabled = !tblFrom;
+    $('tbl-insert').title = tblFrom ? (tblFrom.s !== tblFrom.e ? 'Replace the selected lines with this table' : 'Insert at the cursor') : 'Open a notebook or SOP to put the table in it';
+    $('tbl-insert').textContent = tblFrom && tblFrom.s !== tblFrom.e ? '⬇ Replace selection in note' : '⬇ Put in note';
+    $('tbl-scrim').classList.add('active');
+    tblRender(0, 0);
+});
+
+// ── Tab key types a real tab in notes, so columns paste straight into Excel ──
+$('editor-text').addEventListener('keydown', e => {
+    if (e.key !== 'Tab' || e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return;
+    e.preventDefault();
+    const el = e.target;
+    el.setRangeText('\t', el.selectionStart, el.selectionEnd, 'end');
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+});
+
+// Re-check dock visibility whenever views change
+new MutationObserver(qpRefreshDock).observe($('view-editor'), { attributes: true, attributeFilter: ['style'] });
+window.addEventListener('resize', qpRefreshDock);
 
 </script>
 
