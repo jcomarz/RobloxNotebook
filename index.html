@@ -176,6 +176,39 @@
     font-size: 11px; color: var(--muted);
     display:flex; gap: 10px; align-items:center;
   }
+  /* Accession drop field */
+  .acc-drop-bar {
+    display:flex; align-items:center; gap:6px;
+    padding:5px 12px; background:var(--bg);
+    border-bottom:1px solid var(--border);
+  }
+  .acc-drop-label {
+    font-size:9.5px; letter-spacing:1.2px; font-weight:700;
+    color:var(--muted); opacity:.75; flex-shrink:0;
+  }
+  .acc-drop-input {
+    flex:1; min-width:0;
+    background:transparent; color:var(--accent);
+    border:1px dashed var(--panel-2); border-radius:6px;
+    padding:4px 8px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:12px; letter-spacing:.5px; outline:none;
+    transition:border-color .12s, background .12s;
+  }
+  .acc-drop-input::placeholder { color:var(--muted); opacity:.5; letter-spacing:0; font-family:var(--ui,inherit); }
+  .acc-drop-input:focus { border-color:var(--accent); border-style:solid; }
+  /* The whole bar lights up on dragover — a 1px dashed outline is not enough
+     of a target to aim at while dragging. */
+  .acc-drop-bar.acc-over .acc-drop-input {
+    border-color:var(--green); border-style:solid;
+    background:rgba(34,197,94,.10); color:var(--green);
+  }
+  .acc-drop-btn {
+    flex-shrink:0; background:transparent; border:1px solid var(--border);
+    color:var(--muted); border-radius:6px; cursor:pointer;
+    font-size:11px; line-height:1; padding:4px 7px;
+  }
+  .acc-drop-btn:hover { color:var(--text); border-color:var(--panel-2); }
+  .acc-drop-btn:disabled { opacity:.35; cursor:default; }
   .pages-nav {
     padding: 6px 12px;
     background: var(--panel);
@@ -541,6 +574,16 @@
     <div class="editor-meta">
       <span id="editor-meta-type"></span>
       <span id="editor-meta-modified" style="flex:1; text-align:right;"></span>
+    </div>
+    <!-- Accession drop field. Drag a capture row in from Diamond; nothing is
+         written into the note unless you press ↵. -->
+    <div class="acc-drop-bar" id="acc-drop-bar">
+      <span class="acc-drop-label">ACC</span>
+      <input class="acc-drop-input" id="acc-drop-input" placeholder="drag an accession here"
+             spellcheck="false" autocomplete="off">
+      <button class="acc-drop-btn" id="acc-drop-copy"   title="Copy">⧉</button>
+      <button class="acc-drop-btn" id="acc-drop-insert" title="Insert at the cursor in the note">↵</button>
+      <button class="acc-drop-btn" id="acc-drop-clear"  title="Clear">✕</button>
     </div>
     <div class="pages-nav" id="pages-nav" style="display:none;"></div>
     <div class="editor-body">
@@ -9525,6 +9568,127 @@ $('editor-text').addEventListener('keydown', e => {
 // Re-check dock visibility whenever views change
 new MutationObserver(qpRefreshDock).observe($('view-editor'), { attributes: true, attributeFilter: ['style'] });
 window.addEventListener('resize', qpRefreshDock);
+
+/* ══ Accession drop field ═══════════════════════════════════════════
+   Drag a capture row out of Diamond and onto the ACC bar in the editor.
+   Self-contained on purpose: it owns four elements by id, touches nothing
+   else, and writes into the note only when you press ↵. */
+(function () {
+  const bar    = document.getElementById('acc-drop-bar');
+  const input  = document.getElementById('acc-drop-input');
+  if (!bar || !input) return;
+  const bCopy  = document.getElementById('acc-drop-copy');
+  const bIns   = document.getElementById('acc-drop-insert');
+  const bClear = document.getElementById('acc-drop-clear');
+  const LS_KEY = 'nb_acc_drop';
+
+  /* A dragged capture row arrives as "4029538 09:27:25 AM", and what you want
+     is 4029538. Seven digits with an optional A01-style suffix, which is how
+     the accessions are written everywhere else.
+     If nothing matches, the raw first line is kept rather than discarded —
+     dropping something unexpected should never silently swallow it. */
+  const ACC_RE = /\b(\d{7}(?:[A-Za-z]\d{2})?)\b/g;
+  function extract(raw) {
+    const text = String(raw || '');
+    const out = [];
+    let m;
+    ACC_RE.lastIndex = 0;
+    while ((m = ACC_RE.exec(text)) !== null) {
+      const v = m[1].toUpperCase();
+      if (out.indexOf(v) < 0) out.push(v);
+      if (out.length >= 20) break;        // a stray Copy All must not flood it
+    }
+    if (out.length) return out.join(' ');
+    return text.split('\n')[0].trim().slice(0, 120);
+  }
+
+  function setValue(v, remember) {
+    input.value = v;
+    if (remember !== false) { try { localStorage.setItem(LS_KEY, v); } catch (e) {} }
+    paint();
+  }
+  function paint() {
+    const has = !!input.value.trim();
+    [bCopy, bIns, bClear].forEach(b => { if (b) b.disabled = !has; });
+  }
+
+  // restore the last one, so a reload does not lose what you parked there
+  try { input.value = localStorage.getItem(LS_KEY) || ''; } catch (e) {}
+  paint();
+
+  /* dragover MUST preventDefault or the browser refuses the drop outright —
+     this is the single most common reason a drop target silently does nothing.
+     It is set on the whole bar, not just the input, to give a target you can
+     actually hit while dragging. */
+  ['dragenter', 'dragover'].forEach(t => bar.addEventListener(t, (e) => {
+    e.preventDefault();
+    try { e.dataTransfer.dropEffect = 'copy'; } catch (err) {}
+    bar.classList.add('acc-over');
+  }));
+  ['dragleave', 'dragend'].forEach(t => bar.addEventListener(t, (e) => {
+    if (t === 'dragleave' && bar.contains(e.relatedTarget)) return;  // moving between children
+    bar.classList.remove('acc-over');
+  }));
+  bar.addEventListener('drop', (e) => {
+    e.preventDefault();
+    bar.classList.remove('acc-over');
+    let raw = '';
+    try {
+      const dt = e.dataTransfer;
+      raw = dt.getData('text/plain') || dt.getData('text') || dt.getData('text/uri-list') || '';
+    } catch (err) {}
+    if (!raw) return;
+    setValue(extract(raw));
+    input.focus();
+    try { input.select(); } catch (err) {}
+  });
+
+  // Typed or pasted in by hand gets the same parse, so the field always holds
+  // the same shape whichever way it was filled.
+  input.addEventListener('paste', (e) => {
+    let raw = '';
+    try { raw = (e.clipboardData || window.clipboardData).getData('text'); } catch (err) {}
+    if (!raw) return;
+    e.preventDefault();
+    setValue(extract(raw));
+  });
+  input.addEventListener('input', () => paint());
+  input.addEventListener('change', () => setValue(input.value.trim()));
+
+  if (bCopy) bCopy.addEventListener('click', () => {
+    const v = input.value.trim();
+    if (!v) return;
+    const done = () => { const t = bCopy.textContent; bCopy.textContent = '✓';
+                         setTimeout(() => { bCopy.textContent = t; }, 700); };
+    try {
+      navigator.clipboard.writeText(v).then(done, () => { input.select(); document.execCommand('copy'); done(); });
+    } catch (err) { try { input.select(); document.execCommand('copy'); done(); } catch (e2) {} }
+  });
+
+  /* The only thing that writes into the note, and only on this click.
+     Inserted at the caret rather than appended, and the existing save path is
+     triggered by dispatching a real input event instead of calling into the
+     editor's internals — that keeps the autosave honest without this block
+     needing to know how it works. */
+  if (bIns) bIns.addEventListener('click', () => {
+    const v = input.value.trim();
+    const ta = document.getElementById('editor-text');
+    if (!v || !ta) return;
+    const s = ta.selectionStart == null ? ta.value.length : ta.selectionStart;
+    const e2 = ta.selectionEnd == null ? s : ta.selectionEnd;
+    ta.value = ta.value.slice(0, s) + v + ta.value.slice(e2);
+    const pos = s + v.length;
+    ta.focus();
+    try { ta.setSelectionRange(pos, pos); } catch (err) {}
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+
+  if (bClear) bClear.addEventListener('click', () => { setValue(''); input.focus(); });
+
+  // Reachable from the console or a bookmarklet if you ever want to push a
+  // value in from somewhere else.
+  window.nbSetAccession = (v) => setValue(extract(v));
+})();
 
 </script>
 
