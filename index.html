@@ -185,7 +185,18 @@
   .acc-drop-label {
     font-size:9.5px; letter-spacing:1.2px; font-weight:700;
     color:var(--muted); opacity:.75; flex-shrink:0;
+    cursor:grab; user-select:none; padding:3px 4px; border-radius:4px;
   }
+  .acc-drop-label:active { cursor:grabbing; }
+  .acc-drop-label:hover  { color:var(--accent); background:rgba(96,165,250,.10); }
+  /* A new accession arriving is easy to miss when you are looking elsewhere,
+     so the field flashes once rather than changing silently. */
+  @keyframes accArrive {
+    0%   { background:rgba(34,197,94,.30); border-color:var(--green); }
+    100% { background:transparent; }
+  }
+  .acc-drop-input.acc-arrived { animation:accArrive 1.1s ease-out; }
+  .acc-drop-btn.acc-pinned { color:var(--accent); border-color:var(--accent); background:rgba(96,165,250,.12); }
   .acc-drop-input {
     flex:1; min-width:0;
     background:transparent; color:var(--accent);
@@ -578,9 +589,11 @@
     <!-- Accession drop field. Drag a capture row in from Diamond; nothing is
          written into the note unless you press ↵. -->
     <div class="acc-drop-bar" id="acc-drop-bar">
-      <span class="acc-drop-label">ACC</span>
-      <input class="acc-drop-input" id="acc-drop-input" placeholder="drag an accession here"
+      <span class="acc-drop-label" id="acc-drop-grip" draggable="true"
+            title="Drag this out to carry the accession somewhere else">⠿ ACC</span>
+      <input class="acc-drop-input" id="acc-drop-input" placeholder="waiting for a capture…"
              spellcheck="false" autocomplete="off">
+      <button class="acc-drop-btn" id="acc-drop-pin"    title="Pin — stop new captures replacing this">📌</button>
       <button class="acc-drop-btn" id="acc-drop-copy"   title="Copy">⧉</button>
       <button class="acc-drop-btn" id="acc-drop-insert" title="Insert at the cursor in the note">↵</button>
       <button class="acc-drop-btn" id="acc-drop-clear"  title="Clear">✕</button>
@@ -8178,6 +8191,8 @@ async function boot() {
     attachNotebooksListener();
     attachDragonsListener();
     attachQuickPhrases();
+    // Accession feed from Diamond — fills the ACC field in the editor.
+    try { if (window.nbAttachAccessionFeed) window.nbAttachAccessionFeed(); } catch (e) {}
 }
 
 $('btn-refresh').addEventListener('click', boot);
@@ -9578,6 +9593,7 @@ window.addEventListener('resize', qpRefreshDock);
   const input  = document.getElementById('acc-drop-input');
   if (!bar || !input) return;
   const bCopy  = document.getElementById('acc-drop-copy');
+  const bPin   = document.getElementById('acc-drop-pin');
   const bIns   = document.getElementById('acc-drop-insert');
   const bClear = document.getElementById('acc-drop-clear');
   const LS_KEY = 'nb_acc_drop';
@@ -9684,6 +9700,79 @@ window.addEventListener('resize', qpRefreshDock);
   });
 
   if (bClear) bClear.addEventListener('click', () => { setValue(''); input.focus(); });
+
+  /* ── Drag OUT ────────────────────────────────────────────────────
+     The grip carries the accession to wherever you need it next. An <input>
+     will not start a drag from its own value unless the text happens to be
+     selected, so the handle is a separate element that sets the payload
+     explicitly. */
+  const grip = document.getElementById('acc-drop-grip');
+  if (grip) {
+    grip.addEventListener('dragstart', (e) => {
+      const v = input.value.trim();
+      if (!v) { e.preventDefault(); return; }
+      try {
+        e.dataTransfer.setData('text/plain', v);
+        e.dataTransfer.effectAllowed = 'copy';
+      } catch (err) {}
+    });
+  }
+
+  /* ── Pin ─────────────────────────────────────────────────────────
+     Freezes the field so an incoming capture cannot replace what you are
+     part-way through using. Without it, capturing the next accession while
+     you are dragging this one out swaps the value underneath you. */
+  const LS_PIN = 'nb_acc_pin';
+  const isPinned = () => { try { return localStorage.getItem(LS_PIN) === '1'; } catch (e) { return false; } };
+  function paintPin() {
+    if (!bPin) return;
+    const on = isPinned();
+    bPin.classList.toggle('acc-pinned', on);
+    bPin.title = on ? 'Pinned — new captures will NOT replace this. Click to unpin.'
+                    : 'Pin — stop new captures replacing this';
+    bPin.disabled = false;      // the pin stays usable even when empty
+  }
+  if (bPin) {
+    bPin.addEventListener('click', () => {
+      try { localStorage.setItem(LS_PIN, isPinned() ? '0' : '1'); } catch (e) {}
+      paintPin();
+    });
+    paintPin();
+  }
+
+  /* ── Auto-fill from Diamond ──────────────────────────────────────
+     Diamond writes the accession it just captured to
+     rooms/<room>/dh_sync/lastAccession, and this picks it up. Firebase
+     replays the current value on attach, so the timestamp is what stops a
+     reload from re-announcing an accession you captured an hour ago — and
+     what stops a dropped connection re-applying the same one on reconnect. */
+  let lastSeenTs = 0;
+  try { lastSeenTs = +(localStorage.getItem('nb_acc_ts') || 0) || 0; } catch (e) {}
+
+  window.nbAttachAccessionFeed = function () {
+    try {
+      if (typeof db === 'undefined' || !db || !window.state || !state.room) return false;
+      if (window.__nbAccFeedOn) return true;       // boot() can be called again
+      window.__nbAccFeedOn = true;
+      db.ref('rooms/' + state.room + '/dh_sync/lastAccession').on('value', (snap) => {
+        const d = snap.val();
+        if (!d || !d.acc) return;
+        const ts = +d.ts || 0;
+        if (ts && ts <= lastSeenTs) return;        // already shown, or stale replay
+        lastSeenTs = ts;
+        try { localStorage.setItem('nb_acc_ts', String(ts)); } catch (e) {}
+        if (isPinned()) return;                    // you are using the old one
+        setValue(extract(String(d.acc)));
+        input.classList.remove('acc-arrived');
+        void input.offsetWidth;                    // restart the animation
+        input.classList.add('acc-arrived');
+      });
+      return true;
+    } catch (e) { console.warn('[nb] accession feed failed', e); return false; }
+  };
+  // boot() calls this once the room is known; this covers a reload where the
+  // room was already stored and boot has run before this block evaluated.
+  setTimeout(() => { try { window.nbAttachAccessionFeed(); } catch (e) {} }, 1200);
 
   // Reachable from the console or a bookmarklet if you ever want to push a
   // value in from somewhere else.
