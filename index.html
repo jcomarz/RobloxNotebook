@@ -9751,9 +9751,16 @@ window.addEventListener('resize', qpRefreshDock);
 
   window.nbAttachAccessionFeed = function () {
     try {
-      if (typeof db === 'undefined' || !db || !window.state || !state.room) return false;
+      /* `db` and `state` are top-level const/let in an earlier <script>, which
+         makes them GLOBAL LEXICAL bindings — reachable by name from here, but
+         NOT properties of window. Testing window.state is always undefined,
+         which silently disabled this whole feed. typeof is the check that
+         works for both, and does not throw if the name is absent. */
+      if (typeof db === 'undefined' || !db) return false;
+      if (typeof state === 'undefined' || !state || !state.room) return false;
       if (window.__nbAccFeedOn) return true;       // boot() can be called again
       window.__nbAccFeedOn = true;
+      input.placeholder = 'waiting for a capture…';
       db.ref('rooms/' + state.room + '/dh_sync/lastAccession').on('value', (snap) => {
         const d = snap.val();
         if (!d || !d.acc) return;
@@ -9770,9 +9777,21 @@ window.addEventListener('resize', qpRefreshDock);
       return true;
     } catch (e) { console.warn('[nb] accession feed failed', e); return false; }
   };
-  // boot() calls this once the room is known; this covers a reload where the
-  // room was already stored and boot has run before this block evaluated.
-  setTimeout(() => { try { window.nbAttachAccessionFeed(); } catch (e) {} }, 1200);
+  /* boot() calls this once you connect. The retries cover the window before
+     that — and make the state visible rather than leaving a field that just
+     sits there saying "waiting" whether or not anything is listening. */
+  input.placeholder = 'connect to a room first…';
+  let attachTries = 0;
+  (function tryAttach() {
+    let onNow = false;
+    try { onNow = window.nbAttachAccessionFeed(); } catch (e) {}
+    if (onNow) return;
+    if (++attachTries > 40) {                      // ~60s, then stop trying
+      input.placeholder = 'accession feed not connected';
+      return;
+    }
+    setTimeout(tryAttach, 1500);
+  })();
 
   // Reachable from the console or a bookmarklet if you ever want to push a
   // value in from somewhere else.
