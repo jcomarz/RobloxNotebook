@@ -182,13 +182,24 @@
     padding:5px 12px; background:var(--bg);
     border-bottom:1px solid var(--border);
   }
-  .acc-drop-label {
-    font-size:9.5px; letter-spacing:1.2px; font-weight:700;
-    color:var(--muted); opacity:.75; flex-shrink:0;
-    cursor:grab; user-select:none; padding:3px 4px; border-radius:4px;
+  /* The pill. Carries the accession and is the thing you drag; it has to read
+     as grabbable at a glance or it just looks like a label. */
+  .acc-pill {
+    flex-shrink:0; cursor:grab; user-select:none;
+    display:inline-flex; align-items:center; gap:5px;
+    padding:3px 10px; border-radius:999px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:11.5px; font-weight:700; letter-spacing:.5px;
+    background:rgba(148,163,184,.12); border:1px solid var(--border);
+    color:var(--muted);
+    transition:background .12s, color .12s, border-color .12s, transform .08s;
   }
-  .acc-drop-label:active { cursor:grabbing; }
-  .acc-drop-label:hover  { color:var(--accent); background:rgba(96,165,250,.10); }
+  .acc-pill.acc-pill-live {
+    background:rgba(96,165,250,.16); border-color:var(--accent); color:var(--accent);
+  }
+  .acc-pill.acc-pill-live:hover { background:rgba(96,165,250,.28); transform:translateY(-1px); }
+  .acc-pill:active { cursor:grabbing; transform:scale(.97); }
+  .acc-pill.acc-pill-empty { opacity:.55; cursor:default; }
   /* A new accession arriving is easy to miss when you are looking elsewhere,
      so the field flashes once rather than changing silently. */
   @keyframes accArrive {
@@ -589,8 +600,8 @@
     <!-- Accession drop field. Drag a capture row in from Diamond; nothing is
          written into the note unless you press ↵. -->
     <div class="acc-drop-bar" id="acc-drop-bar">
-      <span class="acc-drop-label" id="acc-drop-grip" draggable="true"
-            title="Drag this out to carry the accession somewhere else">⠿ ACC</span>
+      <span class="acc-pill" id="acc-drop-grip" draggable="true"
+            title="Drag me into any field — I land where you drop the cursor">⠿ ACC</span>
       <input class="acc-drop-input" id="acc-drop-input" placeholder="waiting for a capture…"
              spellcheck="false" autocomplete="off">
       <button class="acc-drop-btn" id="acc-drop-pin"    title="Pin — stop new captures replacing this">📌</button>
@@ -9624,8 +9635,21 @@ window.addEventListener('resize', qpRefreshDock);
     paint();
   }
   function paint() {
-    const has = !!input.value.trim();
+    const v = input.value.trim();
+    const has = !!v;
     [bCopy, bIns, bClear].forEach(b => { if (b) b.disabled = !has; });
+    const grip = document.getElementById('acc-drop-grip');
+    if (grip) {
+      // The pill shows what it is carrying, so there is no doubt what will
+      // land when you drop it.
+      grip.textContent = has ? '⠿ ' + v : '⠿ ACC';
+      grip.classList.toggle('acc-pill-live', has);
+      grip.classList.toggle('acc-pill-empty', !has);
+      grip.setAttribute('draggable', has ? 'true' : 'false');
+      grip.title = has
+        ? 'Drag me into any field — I land where you drop the cursor'
+        : 'Nothing to drag yet — capture an accession';
+    }
   }
 
   // restore the last one, so a reload does not lose what you parked there
@@ -9792,6 +9816,37 @@ window.addEventListener('resize', qpRefreshDock);
     }
     setTimeout(tryAttach, 1500);
   })();
+
+  /* ── Dropping the pill into any field ────────────────────────────
+     Deliberately does NOT preventDefault. The browser already inserts dropped
+     text/plain at the exact caret position you dropped on — reimplementing
+     that means converting drop coordinates to a character offset, which
+     caretRangeFromPoint does not do reliably inside a <textarea>, and it
+     would be worse than what is built in.
+
+     What IS missing is the notification. A native drop mutates .value without
+     firing anything, so autosave, live previews and any framework-bound field
+     never learn the text changed — the classic "it looks right until you
+     reload" bug. One input event after the fact fixes that, and is the only
+     thing this handler does.
+
+     Scoped to the next tick because the value is not updated until the
+     browser's own drop handling has run. */
+  document.addEventListener('drop', (e) => {
+    const t = e.target;
+    if (!t || bar.contains(t)) return;                  // our own field has its own handler
+    const tag = t.tagName;
+    const editable = tag === 'TEXTAREA' ||
+                     (tag === 'INPUT' && !/^(checkbox|radio|button|submit|file|range|color)$/i.test(t.type || 'text')) ||
+                     (t.isContentEditable === true);
+    if (!editable) return;
+    setTimeout(() => {
+      try {
+        t.dispatchEvent(new Event('input',  { bubbles: true }));
+        t.dispatchEvent(new Event('change', { bubbles: true }));
+      } catch (err) {}
+    }, 0);
+  }, true);
 
   // Reachable from the console or a bookmarklet if you ever want to push a
   // value in from somewhere else.
